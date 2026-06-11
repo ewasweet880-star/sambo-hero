@@ -66,9 +66,33 @@ const ACHIEVEMENTS = [
   { id: "l5",   icon: "🔵", title: "Синий пояс",            desc: "Уровень «Мастер»",         cond: (c) => c.levelIdx >= 4 },
   { id: "c1",   icon: "🥇", title: "Первый бой",            desc: "Первое соревнование",      cond: (c) => c.comps >= 1 },
   { id: "c5",   icon: "🏟️", title: "Турнирный боец",        desc: "5 соревнований",           cond: (c) => c.comps >= 5 },
+  { id: "bar1", icon: "🤸", title: "Первый вис",            desc: "Первое утреннее",          cond: (c) => (c.mornings||0) >= 1 },
+  { id: "bar10",icon: "💪", title: "10 утренних",           desc: "10 утренних тренировок",   cond: (c) => (c.mornings||0) >= 10 },
+  { id: "bar30",icon: "🦾", title: "Месяц на турнике",      desc: "30 утренних тренировок",   cond: (c) => (c.mornings||0) >= 30 },
+  { id: "pull", icon: "🏅", title: "Первое подтягивание",   desc: "Дошел до этапа p9",        cond: (c) => (c.pullStage||0) >= 8 },
+  { id: "bur1", icon: "🌪️", title: "Первый бёрпи",         desc: "Первый бёрпи Рояла",       cond: (c) => (c.burpees||0) >= 1 },
+  { id: "bur10",icon: "🔥", title: "10 бёрпи-недель",      desc: "10 недель бёрпи",          cond: (c) => (c.burpees||0) >= 10 },
 ];
 const XP_COMPETITION = 100;
 const XP_DAILY = 15;
+const XP_MORNING = 20;
+const XP_BURPEE = 25;
+const BURPEE_START = 3;
+const BURPEE_STEP = 1;
+const PULLUP_PROGRAM = [
+  {id:"p1", label:"Вис 30 сек", sessions:5, desc:"Просто висим!"},
+  {id:"p2", label:"Вис 45 сек", sessions:5, desc:"Держись дольше!"},
+  {id:"p3", label:"Вис 60 сек", sessions:5, desc:"Минута — ты герой!"},
+  {id:"p4", label:"Вис 60 сек x2", sessions:5, desc:"Два подхода"},
+  {id:"p5", label:"Подбородок над турником", sessions:7, desc:"Подпрыгни!"},
+  {id:"p6", label:"Негативные подтягивания", sessions:7, desc:"Медленно вниз"},
+  {id:"p7", label:"Полуподтягивание", sessions:7, desc:"До середины"},
+  {id:"p8", label:"С помощью папы", sessions:7, desc:"Assisted"},
+  {id:"p9", label:"1 подтягивание", sessions:10, desc:"Первое настоящее!"},
+  {id:"p10",label:"2 подтягивания", sessions:10, desc:"Двойной чемпион!"},
+  {id:"p11",label:"3 подтягивания", sessions:10, desc:"Тройная сила!"},
+  {id:"p12",label:"5 подтягиваний", sessions:14, desc:"Настоящий турникмен!"},
+];
 const DAILY_CHALLENGES = [
   { icon: "💪", text: "Сделай 10 отжиманий" },
   { icon: "🤸", text: "Сделай 15 приседаний" },
@@ -121,6 +145,10 @@ const DEFAULT_STATE = {
   stickers: [],
   titleDay: null,
   techniques: [],
+  morningDone: [],
+  pullStageIdx: 0,
+  pullStageSessions: 0,
+  burpeeDone: [],
   reward: { title: "Поход в кино", cost: 10, claimed: 0 },
 };
 
@@ -152,6 +180,7 @@ function getScheduledDays(year, month) {
 }
 
 // Серия = тренировки подряд без пропуска тренировочного дня
+function weekNum(d) { var dt=d||new Date(); return Math.floor((dt-new Date(dt.getFullYear(),0,1))/604800000); }
 function getStreak(trainings) {
   const set = new Set(trainings);
   // строим список всех прошедших тренировочных дней в обратном порядке
@@ -322,7 +351,7 @@ export default function SamboHero() {
       if (fxQueue[0].type === "xp") tg?.HapticFeedback?.impactOccurred("medium");
       else tg?.HapticFeedback?.notificationOccurred("success");
     } catch (e) {}
-    const dur = { xp: 1700, levelup: 2800, achievement: 2500, chest: 2800 }[fxQueue[0].type] || 2000;
+    const dur = { xp: 1700, levelup: 2800, achievement: 2500, chest: 2800, levelup_bar: 2800 }[fxQueue[0].type] || 2000;
     const t = setTimeout(() => setFxQueue((q) => q.slice(1)), dur);
     return () => clearTimeout(t);
   }, [fxQueue]);
@@ -331,6 +360,13 @@ export default function SamboHero() {
   const streak = getStreak(state.trainings);
   const bestStreak = getBestStreak(state.trainings);
   const todayIsTraining = isTrainingDay();
+  var pullStageIdx = Math.min(state.pullStageIdx||0, PULLUP_PROGRAM.length-1);
+  var pullStage = PULLUP_PROGRAM[pullStageIdx];
+  var pullStageSessions = state.pullStageSessions||0;
+  var morningDoneToday = (state.morningDone||[]).includes(todayStr());
+  var thisWeek = new Date().getFullYear()+"-W"+weekNum();
+  var burpeeDoneThisWeek = (state.burpeeDone||[]).includes(thisWeek);
+  var burpeeReps = BURPEE_START + Math.floor((state.burpeeDone||[]).length/4)*BURPEE_STEP;
   const trainedToday = state.trainings.includes(todayStr());
   const rewardProgress = Math.min(state.trainings.length - state.reward.claimed, state.reward.cost);
   const rewardReady = rewardProgress >= state.reward.cost;
@@ -349,7 +385,7 @@ export default function SamboHero() {
     const newXp = s.xp + amount;
     const before = getLevel(s.xp).idx;
     const after = getLevel(newXp).idx;
-    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length, ...extraCtx };
+    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length, mornings:(s.morningDone||[]).length, pullStage:s.pullStageIdx||0, burpees:(s.burpeeDone||[]).length, ...extraCtx };
     const newAchs = checkNewAchievements(ctx, s.achievements);
     const queue = [{ type: "xp", amount }];
     if (after > before) queue.push({ type: "levelup", level: LEVELS[after] });
@@ -459,6 +495,22 @@ export default function SamboHero() {
     });
   };
 
+  const completeMorning = () => {
+    if (morningDoneToday) return;
+    var ns = pullStageSessions + 1;
+    var adv = ns >= pullStage.sessions;
+    var ni = adv ? Math.min(pullStageIdx+1, PULLUP_PROGRAM.length-1) : pullStageIdx;
+    var res = applyXp(state, XP_MORNING, {mornings:(state.morningDone||[]).length+1, pullStage:ni});
+    if (adv && ni > pullStageIdx) res.queue.push({type:"levelup_bar", stage:PULLUP_PROGRAM[ni]});
+    setState(s => ({...s, xp:res.newXp, morningDone:[...(s.morningDone||[]),todayStr()], pullStageIdx:ni, pullStageSessions:adv?0:ns, achievements:[...s.achievements,...res.newAchs.map(a=>a.id)], stats:addStats(s,{str:2,end:1})}));
+    setFxQueue(res.queue);
+  };
+  const completeBurpee = () => {
+    if (burpeeDoneThisWeek) return;
+    var res = applyXp(state, XP_BURPEE, {burpees:(state.burpeeDone||[]).length+1});
+    setState(s => ({...s, xp:res.newXp, burpeeDone:[...(s.burpeeDone||[]),thisWeek], achievements:[...s.achievements,...res.newAchs.map(a=>a.id)], stats:addStats(s,{str:2,end:3})}));
+    setFxQueue(res.queue);
+  };
   const claimReward = () =>
     setState((s) => ({ ...s, reward: { ...s.reward, claimed: s.reward.claimed + s.reward.cost } }));
 
@@ -492,6 +544,13 @@ export default function SamboHero() {
               <div style={{ fontSize: 24, fontWeight: 900, color: "#facc15", letterSpacing: 1 }}>НОВЫЙ УРОВЕНЬ!</div>
               <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>{fx.level.name}</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>Новый пояс: {fx.level.belt}</div>
+            </div>
+          ) : fx.type === "levelup_bar" ? (
+            <div className="sh-pop" style={st.fxCard}>
+              <div style={{fontSize:54}}>🤸</div>
+              <div style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>НОВЫЙ ЭТАП!</div>
+              <div style={{fontSize:20,fontWeight:900,color:"#facc15"}}>{fx.stage.label}</div>
+              <div style={{fontSize:13,color:"#cbd5e1"}}>{fx.stage.desc}</div>
             </div>
           ) : fx.type === "chest" ? (
             <div className="sh-pop" style={st.fxCard}>
@@ -629,6 +688,33 @@ export default function SamboHero() {
             </button>
 
             {/* Испытание дня */}
+            <div style={{...st.card, border:morningDoneToday?"1px solid rgba(74,222,128,.4)":"1px solid rgba(250,204,21,.3)"}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#facc15",textTransform:"uppercase"}}>🤸 Утренний турник</div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:36}}>🏋</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>{pullStage.label}</div>
+                  <div style={{fontSize:12,color:"#94a3b8"}}>{pullStage.desc}</div>
+                  <div style={st.xpBarOuter}><div style={{...st.xpBarInner,background:"#facc15",width:String(Math.round(pullStageSessions/pullStage.sessions*100))+"%"}} /></div>
+                  <div style={{fontSize:11,color:"#facc15",fontWeight:700}}>{pullStageSessions} / {pullStage.sessions} занятий{pullStageIdx<PULLUP_PROGRAM.length-1?" → "+PULLUP_PROGRAM[pullStageIdx+1].label:""}</div>
+                </div>
+                <button style={{...st.dailyBtn,background:morningDoneToday?"rgba(74,222,128,.18)":"linear-gradient(180deg,#fde047,#facc15)",color:morningDoneToday?"#4ade80":"#1c1400"}} onClick={completeMorning} disabled={morningDoneToday}>{morningDoneToday?"✅":"+"+XP_MORNING+" XP"}</button>
+              </div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {PULLUP_PROGRAM.map((p,i)=><div key={p.id} style={{width:18,height:18,borderRadius:4,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",background:i<pullStageIdx?"#22c55e":i===pullStageIdx?"#facc15":"rgba(255,255,255,.08)",color:i<=pullStageIdx?"#052e16":"#64748b"}}>{i+1}</div>)}
+              </div>
+            </div>
+            <div style={{...st.card,border:burpeeDoneThisWeek?"1px solid rgba(74,222,128,.4)":"1px solid rgba(251,146,60,.35)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:34}}>🌪️</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:800,color:"#fb923c",textTransform:"uppercase"}}>Бёрпи недели</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>Бёрпи Рояла × {burpeeReps}</div>
+                  <div style={{fontSize:11,color:"#94a3b8"}}>{burpeeDoneThisWeek?"Выполнено на этой неделе 🎉":"1 раз в неделю, в любой день"}</div>
+                </div>
+                <button style={{...st.dailyBtn,background:burpeeDoneThisWeek?"rgba(74,222,128,.18)":"linear-gradient(180deg,#fb923c,#ea580c)",color:burpeeDoneThisWeek?"#4ade80":"#fff"}} onClick={completeBurpee} disabled={burpeeDoneThisWeek}>{burpeeDoneThisWeek?"✅":"+"+XP_BURPEE+" XP"}</button>
+              </div>
+            </div>
             {/* Испытание дня — каждый день */}
             <div style={{ ...st.card, border: dailyDoneToday ? "1px solid rgba(74,222,128,.4)" : "1px solid rgba(96,165,250,.35)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

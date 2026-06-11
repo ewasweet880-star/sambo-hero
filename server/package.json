@@ -1,0 +1,11 @@
+{
+  "name": "sambo-hero-server",
+  "type": "module",
+  "private": true,
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "better-sqlite3": "^11.10.0",
+    "grammy": "^1.36.1"
+  }
+}

@@ -1,0 +1,18 @@
+name: Deploy to VPS
+on:
+  push:
+    branches: [master, main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 217.60.245.170
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /opt/sambo-hero-tma
+            git pull
+            docker compose up -d --build

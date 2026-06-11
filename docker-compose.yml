@@ -1,0 +1,12 @@
+services:
+  sambo-hero:
+    build: .
+    container_name: sambo-hero
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Europe/Moscow   # часовой пояс для напоминаний
+    ports:
+      - "127.0.0.1:8090:3000"   # наружу только через Traefik
+    volumes:
+      - ./data:/app/data

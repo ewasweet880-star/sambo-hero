@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import confetti from "canvas-confetti";
 
 // ─── Telegram WebApp + API ───────────────────────────────────
 const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
@@ -181,6 +182,25 @@ function getScheduledDays(year, month) {
 
 // Серия = тренировки подряд без пропуска тренировочного дня
 function weekNum(d) { var dt=d||new Date(); return Math.floor((dt-new Date(dt.getFullYear(),0,1))/604800000); }
+function useCountUp(target) {
+  const [val, setVal] = useState(target);
+  const prev = useRef(target);
+  useEffect(() => {
+    var from = prev.current; prev.current = target;
+    if (from === target) return;
+    var start = null; var raf;
+    function step(ts) {
+      if (!start) start = ts;
+      var p = Math.min(1, (ts - start) / 600);
+      var eased = 1 - Math.pow(1 - p, 3);
+      setVal(Math.round(from + (target - from) * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+    }
+    raf = requestAnimationFrame(step);
+    return function() { cancelAnimationFrame(raf); };
+  }, [target]);
+  return val;
+}
 function getStreak(trainings) {
   const set = new Set(trainings);
   // строим список всех прошедших тренировочных дней в обратном порядке
@@ -231,15 +251,17 @@ function plural(n, one, few, many) {
 }
 
 // ─── SVG-персонаж (пояс + экипировка растут с прогрессом) ────
-function SamboCharacter({ beltColor, size = 150, glow = false, gear = {} }) {
+function SamboCharacter({ beltColor, size = 150, glow = false, gear = {}, mood, onTap }) {
+  var bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
   return (
-    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" style={glow ? { filter: "drop-shadow(0 0 18px rgba(250,204,21,.45))" } : undefined}>
+    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.45))" : "none" }}>
       {/* золотая аура Мастера */}
       {gear.aura && (
         <ellipse cx="80" cy="105" rx="72" ry="92" fill="none" stroke="#facc15" strokeWidth="3" opacity=".5" strokeDasharray="6 8" />
       )}
       {/* тень */}
       <ellipse cx="80" cy="192" rx="44" ry="7" fill="rgba(0,0,0,.35)" />
+      <g className={bodyCls}>
       {/* ноги */}
       <rect x="58" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
       <rect x="86" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
@@ -286,6 +308,7 @@ function SamboCharacter({ beltColor, size = 150, glow = false, gear = {} }) {
       <path d="M72 51 q8 6 16 0" stroke="#b45309" strokeWidth="2.5" strokeLinecap="round" fill="none" />
       <circle cx="64" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
       <circle cx="96" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
+      </g>
     </svg>
   );
 }
@@ -299,6 +322,7 @@ export default function SamboHero() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
   const [welcomeBack, setWelcomeBack] = useState(false);
+  const [tapAnim, setTapAnim] = useState(false);
   const [parentUnlocked, setParentUnlocked] = useState(false);
   const [calMonth, setCalMonth] = useState(() => {
     const d = new Date();
@@ -348,6 +372,12 @@ export default function SamboHero() {
     if (!fxQueue.length) return;
     playSound(fxQueue[0].type);
     try {
+      var ft = fxQueue[0].type;
+      if (ft === "achievement") confetti({ particleCount: 110, spread: 75, origin: { y: 0.65 } });
+      else if (ft === "levelup" || ft === "levelup_bar") confetti({ particleCount: 160, spread: 95, origin: { y: 0.6 }, colors: ["#facc15","#fde047","#fb923c","#ffffff"] });
+      else if (ft === "chest") confetti({ particleCount: 70, spread: 60, origin: { y: 0.55 }, colors: ["#facc15","#fb923c","#ef4444"] });
+    } catch (e) {}
+    try {
       if (fxQueue[0].type === "xp") tg?.HapticFeedback?.impactOccurred("medium");
       else tg?.HapticFeedback?.notificationOccurred("success");
     } catch (e) {}
@@ -357,6 +387,7 @@ export default function SamboHero() {
   }, [fxQueue]);
 
   const level = getLevel(state.xp);
+  const dispXp = useCountUp(state.xp);
   const streak = getStreak(state.trainings);
   const bestStreak = getBestStreak(state.trainings);
   const todayIsTraining = isTrainingDay();
@@ -368,6 +399,13 @@ export default function SamboHero() {
   var burpeeDoneThisWeek = (state.burpeeDone||[]).includes(thisWeek);
   var burpeeReps = BURPEE_START + Math.floor((state.burpeeDone||[]).length/4)*BURPEE_STEP;
   const trainedToday = state.trainings.includes(todayStr());
+  var heroMood = fxQueue.length ? (fxQueue[0].type === "levelup" ? "levelup" : "celebrate") : (tapAnim ? "tap" : "idle");
+  const tapHero = () => {
+    if (tapAnim) return;
+    setTapAnim(true);
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light"); } catch (e) {}
+    setTimeout(function() { setTapAnim(false); }, 750);
+  };
   const rewardProgress = Math.min(state.trainings.length - state.reward.claimed, state.reward.cost);
   const rewardReady = rewardProgress >= state.reward.cost;
   const dayIdx = Math.floor(new Date().setHours(0, 0, 0, 0) / 86400000) % DAILY_CHALLENGES.length;
@@ -540,7 +578,7 @@ export default function SamboHero() {
         <div style={st.fxOverlay}>
           {fx.type === "levelup" ? (
             <div className="sh-pop" style={st.fxCard}>
-              <SamboCharacter beltColor={fx.level.beltColor} size={100} glow />
+              <SamboCharacter beltColor={fx.level.beltColor} size={100} glow mood="levelup" />
               <div style={{ fontSize: 24, fontWeight: 900, color: "#facc15", letterSpacing: 1 }}>НОВЫЙ УРОВЕНЬ!</div>
               <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>{fx.level.name}</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>Новый пояс: {fx.level.belt}</div>
@@ -554,9 +592,9 @@ export default function SamboHero() {
             </div>
           ) : fx.type === "chest" ? (
             <div className="sh-pop" style={st.fxCard}>
-              <div style={{ fontSize: 50 }}>🎁</div>
+              <div className="sh-chest" style={{ fontSize: 50 }}>🎁</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#fb923c", letterSpacing: 2 }}>СУНДУК-СЮРПРИЗ!</div>
-              <div style={{ fontSize: 40 }}>{fx.chest.icon}</div>
+              <div className="sh-prize" style={{ fontSize: 40 }}>{fx.chest.icon}</div>
               <div style={{ fontSize: 17, fontWeight: 900, color: "#facc15", textAlign: "center" }}>{fx.chest.text}</div>
             </div>
           ) : fx.type === "achievement" ? (
@@ -624,7 +662,7 @@ export default function SamboHero() {
       )}
 
       {/* ── Контент ── */}
-      <div style={st.scroll}>
+      <div className="sh-stagger" style={st.scroll}>
         {tab === "home" && (
           <>
             <div style={st.header}>
@@ -638,7 +676,7 @@ export default function SamboHero() {
                 <div style={{ fontSize: 13, color: "#facc15", fontWeight: 700 }}>Уровень {level.idx + 1}: {level.cur.name}</div>
                 <div style={st.xpBarOuter}><div style={{ ...st.xpBarInner, width: `${level.progress * 100}%` }} /></div>
                 <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>
-                  {level.next ? `${state.xp} / ${level.next.xp} XP до уровня «${level.next.name}»` : `${state.xp} XP — максимум!`}
+                  {level.next ? `${dispXp} / ${level.next.xp} XP до уровня «${level.next.name}»` : `${dispXp} XP — максимум!`}
                 </div>
               </div>
               <div style={st.streakBox}>
@@ -662,7 +700,7 @@ export default function SamboHero() {
                   <div style={{ fontSize: 13, fontWeight: 800, color: level.cur.beltColor }}>{level.cur.belt}</div>
                 </div>
               </div>
-              <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} />
+              <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
               <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", textAlign: "center", marginTop: 4 }}>
                 {state.trainings.length === 0
                   ? "Твой путь начинается сегодня!"
@@ -1176,7 +1214,7 @@ const st = {
     border: "2px solid #0b1d3a",
   },
   xpBarOuter: { height: 9, borderRadius: 5, background: "rgba(255,255,255,.1)", marginTop: 6, overflow: "hidden" },
-  xpBarInner: { height: "100%", borderRadius: 5, background: "linear-gradient(90deg,#facc15,#fb923c)", transition: "width .6s ease" },
+  xpBarInner: { height: "100%", borderRadius: 5, background: "linear-gradient(90deg,#facc15,#fb923c)", transition: "width .8s cubic-bezier(.34,1.56,.64,1)" },
   streakBox: {
     background: "rgba(255,255,255,.06)", borderRadius: 14, padding: "8px 12px", textAlign: "center",
     border: "1px solid rgba(250,204,21,.25)", flexShrink: 0,
@@ -1285,5 +1323,31 @@ const css = `
 @keyframes sh-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
 .sh-shake { animation: sh-shake .3s ease 2; }
 input:disabled, button:disabled { opacity: .5; }
-@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake { animation: none; } }
+.sh-body { transform-box: fill-box; transform-origin: 50% 95%; animation: sh-breathe 3.2s ease-in-out infinite; }
+@keyframes sh-breathe { 0%,100%{transform:scaleY(1)} 50%{transform:scaleY(1.02) translateY(-1px)} }
+.sh-hero-jump { animation: sh-hero-jump .65s cubic-bezier(.3,1.6,.4,1) infinite; }
+@keyframes sh-hero-jump { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-13px) scaleY(1.04)} 70%{transform:translateY(0) scaleY(.96)} }
+.sh-hero-spin { animation: sh-hero-spin 1s ease-in-out infinite; }
+@keyframes sh-hero-spin { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-7deg) translateY(-6px)} 75%{transform:rotate(7deg) translateY(-6px)} }
+.sh-hero-flex { animation: sh-hero-flex .75s ease; }
+@keyframes sh-hero-flex { 0%,100%{transform:scale(1) rotate(0)} 30%{transform:scale(1.08) rotate(-3deg)} 60%{transform:scale(1.05) rotate(3deg)} }
+.sh-chest { animation: sh-chest .9s ease both; }
+@keyframes sh-chest { 0%{transform:rotate(0)} 15%{transform:rotate(-9deg)} 30%{transform:rotate(9deg)} 45%{transform:rotate(-7deg)} 60%{transform:rotate(7deg) scale(1.06)} 80%{transform:rotate(0) scale(1.18)} 100%{transform:scale(1)} }
+.sh-prize { animation: sh-prize 1.4s cubic-bezier(.3,1.5,.4,1) both; }
+@keyframes sh-prize { 0%,50%{transform:scale(0) translateY(12px);opacity:0} 75%{transform:scale(1.35) translateY(-6px);opacity:1} 100%{transform:scale(1) translateY(0);opacity:1} }
+.sh-stagger > * { animation: sh-slidein .45s ease both; }
+.sh-stagger > *:nth-child(1){animation-delay:.02s}
+.sh-stagger > *:nth-child(2){animation-delay:.07s}
+.sh-stagger > *:nth-child(3){animation-delay:.12s}
+.sh-stagger > *:nth-child(4){animation-delay:.17s}
+.sh-stagger > *:nth-child(5){animation-delay:.22s}
+.sh-stagger > *:nth-child(6){animation-delay:.27s}
+.sh-stagger > *:nth-child(7){animation-delay:.32s}
+.sh-stagger > *:nth-child(8){animation-delay:.37s}
+.sh-stagger > *:nth-child(9){animation-delay:.42s}
+.sh-stagger > *:nth-child(10){animation-delay:.47s}
+@keyframes sh-slidein { 0%{opacity:0;transform:translateY(14px)} 100%{opacity:1;transform:translateY(0)} }
+button { transition: transform .12s ease; }
+button:active:not(:disabled) { transform: scale(.96); }
+@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake,.sh-body,.sh-hero-jump,.sh-hero-spin,.sh-hero-flex,.sh-chest,.sh-prize,.sh-stagger > * { animation: none; } }
 `;

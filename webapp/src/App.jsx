@@ -363,6 +363,100 @@ function SamboCharacter({ beltColor, size = 150, glow = false, gear = {}, mood, 
   );
 }
 
+// ─── 3D-наклон за пальцем (parallax) ─────────────────────────
+function Tilt3D({ children, max = 14, style }) {
+  const ref = useRef(null);
+  const reduced = useRef(false);
+  useEffect(() => {
+    try { reduced.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+  }, []);
+  const apply = (e) => {
+    if (reduced.current) return;
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    el.style.transform = `rotateY(${(px * max).toFixed(2)}deg) rotateX(${(-py * max).toFixed(2)}deg)`;
+  };
+  const reset = () => { const el = ref.current; if (el) el.style.transform = "rotateY(0deg) rotateX(0deg)"; };
+  return (
+    <div style={{ perspective: "640px" }}>
+      <div
+        ref={ref}
+        className="sh-tilt"
+        onPointerMove={apply}
+        onPointerLeave={reset}
+        onPointerUp={reset}
+        onPointerCancel={reset}
+        style={style}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Амбиентные золотые частицы (canvas, дёшево) ─────────────
+function Particles({ count = 20 }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    let reduced = false;
+    try { reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    if (reduced) return;
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let raf = 0, running = true, w = 0, h = 0;
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      w = r.width || canvas.parentElement?.clientWidth || 0;
+      h = r.height || canvas.parentElement?.clientHeight || 0;
+      canvas.width = Math.max(1, Math.round(w * DPR));
+      canvas.height = Math.max(1, Math.round(h * DPR));
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    };
+    resize();
+    const ps = Array.from({ length: count }, () => ({
+      x: Math.random() * (w || 300),
+      y: Math.random() * (h || 400),
+      r: 0.6 + Math.random() * 1.7,
+      vy: 0.15 + Math.random() * 0.35,
+      vx: (Math.random() - 0.5) * 0.15,
+      a: 0.12 + Math.random() * 0.35,
+      tw: Math.random() * Math.PI * 2,
+    }));
+    const tick = () => {
+      if (!running) return;
+      ctx.clearRect(0, 0, w, h);
+      for (const p of ps) {
+        p.y -= p.vy; p.x += p.vx; p.tw += 0.02;
+        if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+        if (p.x < -10) p.x = w + 10; else if (p.x > w + 10) p.x = -10;
+        const alpha = p.a * (0.6 + 0.4 * Math.sin(p.tw));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(253,224,71,${alpha.toFixed(3)})`;
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    const onVis = () => {
+      running = document.visibilityState === "visible";
+      if (running) raf = requestAnimationFrame(tick); else cancelAnimationFrame(raf);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("resize", resize);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("resize", resize);
+    };
+  }, [count]);
+  return <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0 }} />;
+}
+
 // ─── Приложение ──────────────────────────────────────────────
 export default function SamboHero() {
   const [state, setState] = useState(DEFAULT_STATE);
@@ -659,34 +753,38 @@ export default function SamboHero() {
   return (
     <div style={st.app}>
       <style>{css}</style>
+      <Particles count={20} />
 
       {/* ── Эффекты ── */}
       {fx && (
         <div style={st.fxOverlay}>
           {fx.type === "levelup" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <SamboCharacter beltColor={fx.level.beltColor} size={100} glow mood="levelup" />
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div style={{ position: "relative", width: 112, height: 136, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div className="sh-ring" style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px dashed rgba(250,204,21,.55)", boxShadow: "0 0 24px rgba(250,204,21,.25)" }} />
+                <SamboCharacter beltColor={fx.level.beltColor} size={100} glow mood="levelup" />
+              </div>
               <div style={{ fontSize: 24, fontWeight: 900, color: "#facc15", letterSpacing: 1 }}>НОВЫЙ УРОВЕНЬ!</div>
               <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>{fx.level.name}</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>Новый пояс: {fx.level.belt}</div>
             </div>
           ) : fx.type === "levelup_bar" ? (
-            <div className="sh-pop" style={st.fxCard}>
+            <div className="sh-fx3d" style={st.fxCard}>
               <div style={{fontSize:54}}>🤸</div>
               <div style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>НОВЫЙ ЭТАП!</div>
               <div style={{fontSize:20,fontWeight:900,color:"#facc15"}}>{fx.stage.label}</div>
               <div style={{fontSize:13,color:"#cbd5e1"}}>{fx.stage.desc}</div>
             </div>
           ) : fx.type === "chest" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <div className="sh-chest" style={{ fontSize: 50 }}>🎁</div>
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div className="sh-chest3d" style={{ fontSize: 50 }}>🎁</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#fb923c", letterSpacing: 2 }}>СУНДУК-СЮРПРИЗ!</div>
-              <div className="sh-prize" style={{ fontSize: 40 }}>{fx.chest.icon}</div>
+              <div className="sh-prize3d" style={{ fontSize: 40 }}>{fx.chest.icon}</div>
               <div style={{ fontSize: 17, fontWeight: 900, color: "#facc15", textAlign: "center" }}>{fx.chest.text}</div>
             </div>
           ) : fx.type === "achievement" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <div style={{ fontSize: 54 }}>{fx.ach.icon}</div>
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div className="sh-ach-badge" style={{ fontSize: 54 }}>{fx.ach.icon}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#60a5fa", letterSpacing: 2 }}>ДОСТИЖЕНИЕ</div>
               <div style={{ fontSize: 20, fontWeight: 900, color: "#facc15" }}>«{fx.ach.title}»</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>{fx.ach.desc}</div>
@@ -751,13 +849,14 @@ export default function SamboHero() {
       {/* ── Контент ── */}
       {isDemo && (
         <div style={{
-          flexShrink: 0, background: "linear-gradient(90deg,#fb923c,#f59e0b)", color: "#2a1205",
+          position: "relative", zIndex: 1, flexShrink: 0,
+          background: "linear-gradient(90deg,#fb923c,#f59e0b)", color: "#2a1205",
           fontSize: 12.5, fontWeight: 800, textAlign: "center", padding: "7px 10px",
         }}>
           👀 Демо-режим · прогресс не сохраняется
         </div>
       )}
-      <div className="sh-stagger" style={st.scroll}>
+      <div className="sh-stagger" style={{ ...st.scroll, position: "relative", zIndex: 1 }}>
         {tab === "home" && (
           <>
             <div style={st.header}>
@@ -795,21 +894,23 @@ export default function SamboHero() {
                   <div style={{ fontSize: 13, fontWeight: 800, color: level.cur.beltColor }}>{level.cur.belt}</div>
                 </div>
               </div>
-              <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                {/* софит над героем */}
-                <div style={{
-                  position: "absolute", top: -6, width: 190, height: 190, borderRadius: "50%",
-                  background: "radial-gradient(circle, rgba(250,204,21,.22), transparent 68%)",
-                  pointerEvents: "none",
-                }} />
-                {/* ковёр (татами) под героем */}
-                <div style={{
-                  position: "absolute", bottom: 2, width: 150, height: 26, borderRadius: "50%",
-                  background: "radial-gradient(ellipse at center, rgba(250,204,21,.20), transparent 72%)",
-                  filter: "blur(2px)", pointerEvents: "none",
-                }} />
-                <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
-              </div>
+              <Tilt3D max={16} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+                <div className="sh-float" style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", transformStyle: "preserve-3d" }}>
+                  {/* софит над героем (ближе к зрителю) */}
+                  <div style={{
+                    position: "absolute", top: -6, width: 190, height: 190, borderRadius: "50%",
+                    background: "radial-gradient(circle, rgba(250,204,21,.22), transparent 68%)",
+                    pointerEvents: "none", transform: "translateZ(24px)",
+                  }} />
+                  {/* ковёр (татами) под героем (дальше от зрителя) */}
+                  <div style={{
+                    position: "absolute", bottom: 2, width: 150, height: 26, borderRadius: "50%",
+                    background: "radial-gradient(ellipse at center, rgba(250,204,21,.22), transparent 72%)",
+                    pointerEvents: "none", transform: "translateZ(-20px)",
+                  }} />
+                  <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
+                </div>
+              </Tilt3D>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", textAlign: "center", marginTop: 4 }}>
                 {state.trainings.length === 0
                   ? "Твой путь начинается сегодня!"
@@ -1409,7 +1510,7 @@ const st = {
     color: "#fff", padding: "11px 12px", fontSize: 15, fontFamily: "inherit", outline: "none",
   },
   nav: {
-    position: "absolute", bottom: 0, left: 0, right: 0, display: "flex",
+    position: "absolute", bottom: 0, left: 0, right: 0, display: "flex", zIndex: 2,
     background: "rgba(7,16,33,.95)", backdropFilter: "blur(10px)", borderTop: "1px solid rgba(255,255,255,.08)",
     padding: "8px 6px calc(8px + env(safe-area-inset-bottom))",
   },
@@ -1463,6 +1564,26 @@ input:disabled, button:disabled { opacity: .5; }
 @keyframes sh-chest { 0%{transform:rotate(0)} 15%{transform:rotate(-9deg)} 30%{transform:rotate(9deg)} 45%{transform:rotate(-7deg)} 60%{transform:rotate(7deg) scale(1.06)} 80%{transform:rotate(0) scale(1.18)} 100%{transform:scale(1)} }
 .sh-prize { animation: sh-prize 1.4s cubic-bezier(.3,1.5,.4,1) both; }
 @keyframes sh-prize { 0%,50%{transform:scale(0) translateY(12px);opacity:0} 75%{transform:scale(1.35) translateY(-6px);opacity:1} 100%{transform:scale(1) translateY(0);opacity:1} }
+/* 3D: вход fx-карточек с перспективой */
+.sh-fx3d { animation: sh-fx3d .5s cubic-bezier(.2,1.1,.3,1) both; }
+@keyframes sh-fx3d { 0%{transform:perspective(700px) rotateX(-22deg) scale(.86);opacity:0} 100%{transform:perspective(700px) rotateX(0) scale(1);opacity:1} }
+/* лёгкое парение героя */
+.sh-float { animation: sh-float 4.6s ease-in-out infinite; }
+@keyframes sh-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
+/* 3D: сундук — оборот вокруг оси Y */
+.sh-chest3d { animation: sh-chest3d 1.15s cubic-bezier(.3,1.3,.4,1) both; }
+@keyframes sh-chest3d { 0%{transform:perspective(600px) rotateY(0) scale(.4);opacity:0} 55%{transform:perspective(600px) rotateY(360deg) scale(1.12);opacity:1} 100%{transform:perspective(600px) rotateY(360deg) scale(1);opacity:1} }
+/* 3D: приз — вылет с вращением */
+.sh-prize3d { animation: sh-prize3d 1.35s cubic-bezier(.3,1.5,.4,1) both; }
+@keyframes sh-prize3d { 0%,45%{transform:perspective(500px) rotateY(200deg) scale(0) translateY(14px);opacity:0} 75%{transform:perspective(500px) rotateY(360deg) scale(1.35) translateY(-6px);opacity:1} 100%{transform:perspective(500px) rotateY(360deg) scale(1) translateY(0);opacity:1} }
+/* значок достижения — вылет с оборотом */
+.sh-ach-badge { animation: sh-ach-badge .7s cubic-bezier(.3,1.5,.4,1) both; }
+@keyframes sh-ach-badge { 0%{transform:perspective(500px) rotateY(180deg) scale(.4);opacity:0} 100%{transform:perspective(500px) rotateY(360deg) scale(1);opacity:1} }
+/* вращающееся кольцо уровня */
+.sh-ring { animation: sh-ring 3s linear infinite; }
+@keyframes sh-ring { to { transform: rotate(360deg) } }
+/* контейнер наклона (3D) */
+.sh-tilt { transform-style: preserve-3d; transition: transform .25s cubic-bezier(.22,1,.36,1); }
 .sh-stagger > * { animation: sh-slidein .45s ease both; }
 .sh-stagger > *:nth-child(1){animation-delay:.02s}
 .sh-stagger > *:nth-child(2){animation-delay:.07s}
@@ -1477,5 +1598,5 @@ input:disabled, button:disabled { opacity: .5; }
 @keyframes sh-slidein { 0%{opacity:0;transform:translateY(14px)} 100%{opacity:1;transform:translateY(0)} }
 button { transition: transform .12s ease; }
 button:active:not(:disabled) { transform: scale(.96); }
-@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake,.sh-body,.sh-hero-jump,.sh-hero-spin,.sh-hero-flex,.sh-chest,.sh-prize,.sh-stagger > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake,.sh-body,.sh-hero-jump,.sh-hero-spin,.sh-hero-flex,.sh-chest,.sh-prize,.sh-fx3d,.sh-float,.sh-chest3d,.sh-prize3d,.sh-ach-badge,.sh-ring,.sh-stagger > * { animation: none; } }
 `;

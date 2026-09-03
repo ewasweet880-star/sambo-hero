@@ -3,6 +3,8 @@ import confetti from "canvas-confetti";
 
 // ─── Telegram WebApp + API ───────────────────────────────────
 const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
+// вне Telegram (обычный браузер) показываем демо-режим с примером прогресса
+const isDemo = !tg;
 async function apiState(method, state) {
   const res = await fetch("/api/state", {
     method,
@@ -262,6 +264,35 @@ function getBestStreak(trainings, days = scheduleDays) {
 function checkNewAchievements(ctx, unlocked) {
   return ACHIEVEMENTS.filter((a) => !unlocked.includes(a.id) && a.cond(ctx));
 }
+// Демо-состояние для просмотра вне Telegram (прогресс не сохраняется)
+function demoState() {
+  const trainings = [];
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - 1); // начинаем со вчера, чтобы серия не зависела от отметки «сегодня»
+  while (trainings.length < 8) {
+    if (isTrainingDay(d)) trainings.push(dateToStr(d));
+    d.setDate(d.getDate() - 1);
+  }
+  return {
+    onboarded: true,
+    name: "Даня",
+    xp: 1450,
+    trainings,
+    missionsDone: ["m1", "m3"],
+    achievements: ["t1", "t10", "s3", "l2", "l3"],
+    competitions: [{ date: "2026-08-29", place: 2 }],
+    dailyDone: [],
+    stats: { str: 24, end: 18, tech: 16 },
+    stickers: ["🦁", "⚡", "🔥"],
+    techniques: ["k1", "k2", "k3", "k4"],
+    morningDone: [],
+    pullStageIdx: 2,
+    pullStageSessions: 3,
+    burpeeDone: [],
+    reward: { title: "Поход в кино", cost: 10, claimed: 0 },
+  };
+}
 function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;
@@ -358,6 +389,12 @@ export default function SamboHero() {
     tg?.expand();
     try { tg?.setHeaderColor("#0b1d3a"); tg?.setBackgroundColor("#0b1d3a"); } catch (e) {}
     let cancelled = false;
+    // демо-режим (вне Telegram): показываем интерфейс с примером, без сети
+    if (isDemo) {
+      setState((s) => ({ ...s, ...demoState() }));
+      setLoaded(true);
+      return;
+    }
     (async () => {
       try {
         // публичный конфиг расписания (не критичен — при сбое остаёмся на дефолте)
@@ -398,7 +435,7 @@ export default function SamboHero() {
 
   // сохранение на сервер (с дебаунсом)
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || isDemo) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try { await apiState("POST", state); } catch (e) {}
@@ -712,6 +749,14 @@ export default function SamboHero() {
       )}
 
       {/* ── Контент ── */}
+      {isDemo && (
+        <div style={{
+          flexShrink: 0, background: "linear-gradient(90deg,#fb923c,#f59e0b)", color: "#2a1205",
+          fontSize: 12.5, fontWeight: 800, textAlign: "center", padding: "7px 10px",
+        }}>
+          👀 Демо-режим · прогресс не сохраняется
+        </div>
+      )}
       <div className="sh-stagger" style={st.scroll}>
         {tab === "home" && (
           <>
@@ -732,7 +777,7 @@ export default function SamboHero() {
               <div style={st.streakBox}>
                 <div style={{ fontSize: 22 }}>🔥</div>
                 <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", lineHeight: 1 }}>{streak}</div>
-                <div style={{ fontSize: 10, color: "#94a3b8" }}>серия</div>
+                <div style={{ fontSize: 11, color: "#94a3b8" }}>серия</div>
               </div>
             </div>
 
@@ -742,15 +787,29 @@ export default function SamboHero() {
                 <div style={st.heroChip}>
                   <div style={{ fontSize: 20 }}>⭐</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#facc15" }}>+{XP_PER_TRAINING} XP</div>
-                  <div style={{ fontSize: 10, color: "#cbd5e1" }}>за тренировку</div>
+                  <div style={{ fontSize: 11, color: "#cbd5e1" }}>за тренировку</div>
                 </div>
                 <div style={st.heroChip}>
                   <div style={{ width: 34, height: 10, borderRadius: 5, background: level.cur.beltColor, margin: "5px 0" }} />
-                  <div style={{ fontSize: 10, color: "#cbd5e1" }}>Твой пояс</div>
+                  <div style={{ fontSize: 11, color: "#cbd5e1" }}>Твой пояс</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: level.cur.beltColor }}>{level.cur.belt}</div>
                 </div>
               </div>
-              <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
+              <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                {/* софит над героем */}
+                <div style={{
+                  position: "absolute", top: -6, width: 190, height: 190, borderRadius: "50%",
+                  background: "radial-gradient(circle, rgba(250,204,21,.22), transparent 68%)",
+                  pointerEvents: "none",
+                }} />
+                {/* ковёр (татами) под героем */}
+                <div style={{
+                  position: "absolute", bottom: 2, width: 150, height: 26, borderRadius: "50%",
+                  background: "radial-gradient(ellipse at center, rgba(250,204,21,.20), transparent 72%)",
+                  filter: "blur(2px)", pointerEvents: "none",
+                }} />
+                <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
+              </div>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", textAlign: "center", marginTop: 4 }}>
                 {state.trainings.length === 0
                   ? "Твой путь начинается сегодня!"
@@ -850,7 +909,7 @@ export default function SamboHero() {
                     <button key={m.id} onClick={() => toggleMission(m.id, m.xp)} style={{ ...st.mission, ...(done ? st.missionDone : {}) }}>
                       <div style={{ fontSize: 26 }}>{m.icon}</div>
                       <div style={{ fontSize: 11.5, fontWeight: 700, color: done ? "#4ade80" : "#e2e8f0", lineHeight: 1.3 }}>{m.text}</div>
-                      <div style={{ fontSize: 10, color: done ? "#4ade80" : "#facc15", fontWeight: 800 }}>{done ? "✅ +" + m.xp + " XP" : "+" + m.xp + " XP"}</div>
+                      <div style={{ fontSize: 11, color: done ? "#4ade80" : "#facc15", fontWeight: 800 }}>{done ? "✅ +" + m.xp + " XP" : "+" + m.xp + " XP"}</div>
                     </button>
                   );
                 })}
@@ -881,8 +940,8 @@ export default function SamboHero() {
           { id: "settings", icon: "🔒", label: "Родитель" },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...st.navBtn, ...(tab === t.id ? st.navBtnActive : {}) }}>
-            <div style={{ fontSize: 20 }}>{t.icon}</div>
-            <div style={{ fontSize: 10, fontWeight: 700 }}>{t.label}</div>
+            <div style={{ fontSize: 22, lineHeight: 1 }}>{t.icon}</div>
+            <div style={{ fontSize: 11, fontWeight: 800 }}>{t.label}</div>
           </button>
         ))}
       </div>
@@ -1091,7 +1150,7 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
               <div key={g.key} style={{ ...st.achBox, opacity: got ? 1 : 0.4, border: got ? "1px solid rgba(250,204,21,.45)" : "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontSize: 24, filter: got ? "none" : "grayscale(1)" }}>{g.icon}</div>
                 <div style={{ fontSize: 11, fontWeight: 800, color: got ? "#facc15" : "#94a3b8" }}>{g.name}</div>
-                <div style={{ fontSize: 9.5, color: "#64748b" }}>{got ? "Надето на героя!" : "🔒 " + g.how}</div>
+                <div style={{ fontSize: 10.5, color: "#64748b" }}>{got ? "Надето на героя!" : "🔒 " + g.how}</div>
               </div>
             );
           })}
@@ -1114,8 +1173,8 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
                   opacity: got ? 1 : 0.5, border: got ? "1px solid rgba(96,165,250,.5)" : "1px dashed rgba(255,255,255,.2)",
                   background: got ? "rgba(96,165,250,.08)" : "rgba(0,0,0,.25)" }}>
                 <div style={{ fontSize: 24, filter: got ? "none" : "grayscale(1)" }}>{t.icon}</div>
-                <div style={{ fontSize: 10, fontWeight: 800, color: got ? "#60a5fa" : "#94a3b8", lineHeight: 1.2 }}>{t.name}</div>
-                <div style={{ fontSize: 9 }}>{got ? "✅" : "➕ изучить"}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: got ? "#60a5fa" : "#94a3b8", lineHeight: 1.2 }}>{t.name}</div>
+                <div style={{ fontSize: 10 }}>{got ? "✅" : "➕ изучить"}</div>
               </button>
             );
           })}
@@ -1175,8 +1234,8 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
             return (
               <div key={a.id} style={{ ...st.achBox, opacity: got ? 1 : 0.35, border: got ? "1px solid rgba(250,204,21,.45)" : "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontSize: 26, filter: got ? "none" : "grayscale(1)" }}>{a.icon}</div>
-                <div style={{ fontSize: 10.5, fontWeight: 800, color: got ? "#facc15" : "#94a3b8", lineHeight: 1.2 }}>{a.title}</div>
-                <div style={{ fontSize: 9, color: "#64748b", lineHeight: 1.2 }}>{got ? a.desc : "🔒 " + a.desc}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: got ? "#facc15" : "#94a3b8", lineHeight: 1.2 }}>{a.title}</div>
+                <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.2 }}>{got ? a.desc : "🔒 " + a.desc}</div>
               </div>
             );
           })}
@@ -1248,7 +1307,14 @@ function Settings({ state, setState, onLock }) {
 const st = {
   app: {
     minHeight: "100vh", maxWidth: 480, margin: "0 auto", position: "relative",
-    background: "linear-gradient(165deg,#0b1d3a 0%,#0e2a5c 45%,#091428 100%)",
+    background: [
+      "radial-gradient(110% 46% at 50% -8%, rgba(96,165,250,.20), transparent 60%)",
+      "radial-gradient(60% 30% at 100% 18%, rgba(250,204,21,.10), transparent 60%)",
+      "radial-gradient(70% 36% at -10% 62%, rgba(251,146,60,.10), transparent 60%)",
+      "repeating-linear-gradient(45deg, rgba(255,255,255,.014) 0 2px, transparent 2px 7px)",
+      "repeating-linear-gradient(-45deg, rgba(255,255,255,.014) 0 2px, transparent 2px 7px)",
+      "linear-gradient(165deg,#0b1d3a 0%,#0e2a5c 45%,#091428 100%)",
+    ].join(", "),
     fontFamily: "'Nunito','Segoe UI',system-ui,sans-serif",
     display: "flex", flexDirection: "column",
   },
@@ -1270,8 +1336,11 @@ const st = {
     border: "1px solid rgba(250,204,21,.25)", flexShrink: 0,
   },
   heroCard: {
-    background: "linear-gradient(180deg,rgba(30,58,110,.65),rgba(11,29,58,.85))",
-    border: "1px solid rgba(250,204,21,.18)", borderRadius: 22, padding: 16,
+    background: [
+      "radial-gradient(90% 70% at 50% 8%, rgba(250,204,21,.14), transparent 65%)",
+      "linear-gradient(180deg,rgba(30,58,110,.65),rgba(11,29,58,.85))",
+    ].join(", "),
+    border: "1px solid rgba(250,204,21,.22)", borderRadius: 22, padding: 16,
     display: "flex", flexDirection: "column", alignItems: "center",
     boxShadow: "0 12px 32px rgba(0,0,0,.35)",
   },
@@ -1280,9 +1349,10 @@ const st = {
     display: "flex", flexDirection: "column", alignItems: "center", minWidth: 86,
   },
   bigBtn: {
-    background: "linear-gradient(180deg,#fde047,#facc15)", color: "#1c1400",
-    fontSize: 17, fontWeight: 900, letterSpacing: 0.5, border: "none", borderRadius: 18,
-    padding: "18px 12px", cursor: "pointer", boxShadow: "0 10px 24px rgba(250,204,21,.35)",
+    background: "linear-gradient(180deg,#fde047,#fbbf24)", color: "#1c1400",
+    fontSize: 17, fontWeight: 900, letterSpacing: 0.5, border: "1px solid rgba(255,255,255,.35)",
+    borderRadius: 18, padding: "18px 12px", cursor: "pointer",
+    boxShadow: "0 12px 28px rgba(250,204,21,.40), inset 0 1px 0 rgba(255,255,255,.6)",
     fontFamily: "inherit",
   },
   bigBtnDone: { background: "rgba(74,222,128,.18)", color: "#4ade80", boxShadow: "none", border: "1px solid rgba(74,222,128,.4)", cursor: "default" },
@@ -1295,13 +1365,17 @@ const st = {
     border: "none", borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
   },
   card: {
-    background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)",
+    background: "linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02))",
+    border: "1px solid rgba(255,255,255,.10)",
     borderRadius: 20, padding: 16, display: "flex", flexDirection: "column", gap: 10,
+    boxShadow: "0 10px 28px rgba(0,0,0,.28)",
   },
   cardTitle: { fontSize: 14, fontWeight: 800, color: "#facc15", letterSpacing: 0.4, textTransform: "uppercase" },
   claimBtn: {
     background: "linear-gradient(180deg,#4ade80,#22c55e)", color: "#052e16", fontWeight: 900, fontSize: 15,
-    border: "none", borderRadius: 14, padding: "12px", cursor: "pointer", fontFamily: "inherit",
+    border: "1px solid rgba(255,255,255,.25)", borderRadius: 14, padding: "12px", cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(34,197,94,.35), inset 0 1px 0 rgba(255,255,255,.5)",
+    fontFamily: "inherit",
   },
   ghostBtn: {
     background: "rgba(255,255,255,.08)", color: "#e2e8f0", fontWeight: 800, fontSize: 15,
@@ -1341,10 +1415,14 @@ const st = {
   },
   navBtn: {
     flex: 1, background: "none", border: "none", color: "#64748b", cursor: "pointer",
-    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "6px 0",
-    borderRadius: 12, fontFamily: "inherit",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "7px 0",
+    borderRadius: 14, fontFamily: "inherit",
   },
-  navBtnActive: { color: "#facc15", background: "rgba(250,204,21,.1)" },
+  navBtnActive: {
+    color: "#facc15",
+    background: "linear-gradient(180deg, rgba(250,204,21,.20), rgba(250,204,21,.07))",
+    boxShadow: "inset 0 0 0 1px rgba(250,204,21,.30), 0 4px 12px rgba(0,0,0,.25)",
+  },
   fxOverlay: {
     position: "absolute", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
     pointerEvents: "none", background: "rgba(5,10,22,.45)", padding: 24,

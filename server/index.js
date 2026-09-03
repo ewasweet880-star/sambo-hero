@@ -10,8 +10,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const APP_URL = process.env.APP_URL; // напр. https://sambo.procurarus.com
-const SCHEDULE_DAYS = [1, 3, 5]; // 1=пн, 3=ср, 5=пт
-const REMIND_TIME = process.env.REMIND_TIME || "17:00"; // за 30 мин до 17:30
+// Расписание — единый источник для бота и фронта (отдаётся в /api/config).
+// 1=пн, 3=ср, 5=пт — можно переопределить: SCHEDULE_DAYS="2,4,6"
+const SCHEDULE_DAYS = (process.env.SCHEDULE_DAYS || "1,3,5")
+  .split(",").map(Number).filter((n) => n >= 1 && n <= 7);
+const TRAINING_TIME = process.env.TRAINING_TIME || "17:30"; // начало тренировки
+const REMIND_TIME = process.env.REMIND_TIME || "17:00"; // за 30 мин до начала
 const PORT = Number(process.env.PORT || 3000);
 
 if (!BOT_TOKEN || !APP_URL) {
@@ -83,6 +87,11 @@ app.post("/api/state", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// конфиг расписания (публичный, без секретов) — фронт синхронизируется с ботом
+app.get("/api/config", (_req, res) => {
+  res.json({ scheduleDays: SCHEDULE_DAYS, remindTime: REMIND_TIME, trainingTime: TRAINING_TIME });
+});
+
 // статика собранного webapp
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (_, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
@@ -92,12 +101,18 @@ app.listen(PORT, () => console.log(`Sambo Hero API on :${PORT}`));
 // ─── Бот ─────────────────────────────────────────────────────
 const bot = new Bot(BOT_TOKEN);
 const openKb = () => new InlineKeyboard().webApp("🥋 Открыть Sambo Hero", APP_URL);
+const scheduleText = () => {
+  const names = ["", "пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const days = [...SCHEDULE_DAYS].sort().map((d) => names[d]).join(", ");
+  return `Тренировки: ${days} в ${TRAINING_TIME}`;
+};
 
 bot.command("start", async (ctx) => {
   upsertUser.run(ctx.from.id, ctx.from.first_name || "");
   await ctx.reply(
     "Привет! 🥋 Это Sambo Hero — игра, где тренировки превращаются в уровни, пояса и награды.\n\n" +
     "Открой приложение, отметь тренировку и начни свою серию 🔥\n\n" +
+    scheduleText() + "\n\n" +
     "Команды:\n/remind_on — напоминания о тренировке\n/remind_off — выключить напоминания",
     { reply_markup: openKb() }
   );
@@ -106,7 +121,7 @@ bot.command("start", async (ctx) => {
 bot.command("remind_on", async (ctx) => {
   upsertUser.run(ctx.from.id, ctx.from.first_name || "");
   setRemind.run(1, ctx.from.id);
-  await ctx.reply(`Напоминания включены ✅ Буду писать каждый день в ${REMIND_TIME}.`);
+  await ctx.reply(`Напоминания включены ✅ Буду писать в тренировочные дни в ${REMIND_TIME}.`);
 });
 
 bot.command("remind_off", async (ctx) => {
@@ -139,13 +154,23 @@ setInterval(async () => {
         const tr = JSON.parse(u.state || "{}").trainings || [];
         const set = new Set(tr);
         const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        const today = new Date(d);
         const ds = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
-        if (!set.has(ds(d))) d.setDate(d.getDate() - 1);
-        while (set.has(ds(d))) { streak++; d.setDate(d.getDate() - 1); }
+        const isTrainDay = (dt) => SCHEDULE_DAYS.includes(dt.getDay() === 0 ? 7 : dt.getDay());
+        let started = false;
+        for (let i = 0; i < 365; i++) {
+          if (isTrainDay(d)) {
+            if (set.has(ds(d))) { streak++; started = true; }
+            else if (started) break;
+            else if (d < today) break;
+          }
+          d.setDate(d.getDate() - 1);
+        }
       } catch {}
       const msg = streak > 0
-        ? `Сегодня тренировка в 17:30! 🥋 Серия — ${streak} 🔥 Не дай ей прерваться!`
-        : "Сегодня тренировка в 17:30! 🥋 Отметь её в приложении после занятия 💪";
+        ? `Сегодня тренировка в ${TRAINING_TIME}! 🥋 Серия — ${streak} 🔥 Не дай ей прерваться!`
+        : `Сегодня тренировка в ${TRAINING_TIME}! 🥋 Отметь её в приложении после занятия 💪`;
       await bot.api.sendMessage(u.id, msg, { reply_markup: openKb() });
     } catch (e) { /* пользователь заблокировал бота — пропускаем */ }
   }

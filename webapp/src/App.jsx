@@ -162,26 +162,33 @@ function getLevel(xp) {
   return { idx, cur, next, progress: next ? (xp - cur.xp) / (next.xp - cur.xp) : 1 };
 }
 // ─── Расписание тренировок ───────────────────────────────────
-const SCHEDULE_DAYS = [1, 3, 5]; // 1=пн, 3=ср, 5=пт
-const SCHEDULE_TIME = "17:00"; // напоминание за 30 мин до начала (17:30)
+// Единый источник — сервер (/api/config). Значения ниже — только запасные
+// до загрузки конфига; при загрузке переменная перезаписывается.
+let scheduleDays = [1, 3, 5]; // 1=пн, 3=ср, 5=пт
 
-function isTrainingDay(date = new Date()) {
-  return SCHEDULE_DAYS.includes(date.getDay() === 0 ? 7 : date.getDay());
+function isTrainingDay(date = new Date(), days = scheduleDays) {
+  return days.includes(date.getDay() === 0 ? 7 : date.getDay());
 }
 
 // Получить все тренировочные дни в диапазоне дат (для календаря)
-function getScheduledDays(year, month) {
-  const days = [];
+function getScheduledDays(year, month, days = scheduleDays) {
+  const result = [];
   const d = new Date(year, month, 1);
   while (d.getMonth() === month) {
-    if (isTrainingDay(d)) days.push(d.getDate());
+    if (isTrainingDay(d, days)) result.push(d.getDate());
     d.setDate(d.getDate() + 1);
   }
-  return new Set(days);
+  return new Set(result);
 }
 
-// Серия = тренировки подряд без пропуска тренировочного дня
-function weekNum(d) { var dt=d||new Date(); return Math.floor((dt-new Date(dt.getFullYear(),0,1))/604800000); }
+// Неделя для «Бёрпи недели»: начинается с понедельника.
+// Ключ — дата понедельника текущей недели (однозначно и без сдвигов по TZ).
+function mondayOfWeek(d = new Date()) {
+  const dt = new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+  return dt;
+}
 function useCountUp(target) {
   const [val, setVal] = useState(target);
   const prev = useRef(target);
@@ -201,7 +208,7 @@ function useCountUp(target) {
   }, [target]);
   return val;
 }
-function getStreak(trainings) {
+function getStreak(trainings, days = scheduleDays) {
   const set = new Set(trainings);
   // строим список всех прошедших тренировочных дней в обратном порядке
   const today = new Date();
@@ -212,7 +219,7 @@ function getStreak(trainings) {
   // (серия не обнуляется в день тренировки до её начала)
   let started = false;
   for (let i = 0; i < 365; i++) {
-    if (isTrainingDay(d)) {
+    if (isTrainingDay(d, days)) {
       const ds = dateToStr(d);
       if (set.has(ds)) {
         streak++;
@@ -229,12 +236,24 @@ function getStreak(trainings) {
   }
   return streak;
 }
-function getBestStreak(trainings) {
-  const sorted = [...trainings].sort();
-  let best = 0, cur = 0, prev = null;
-  for (const s of sorted) {
+// Лучшая серия = максимум тренировок подряд по тренировочным дням
+// (не по календарным — между пн и ср всегда 2 дня).
+function getBestStreak(trainings, days = scheduleDays) {
+  const set = new Set(trainings);
+  const all = [...set].sort();
+  let best = 0, cur = 0;
+  let prev = null; // предыдущая дата в серии (Date)
+  for (const s of all) {
     const d = new Date(s + "T00:00:00");
-    cur = prev && d - prev === 86400000 ? cur + 1 : 1;
+    if (prev) {
+      // следующий тренировочный день после prev
+      const nd = new Date(prev);
+      nd.setDate(nd.getDate() + 1);
+      while (!isTrainingDay(nd, days)) nd.setDate(nd.getDate() + 1);
+      cur = dateToStr(d) === dateToStr(nd) ? cur + 1 : 1;
+    } else {
+      cur = 1;
+    }
     best = Math.max(best, cur);
     prev = d;
   }
@@ -317,6 +336,9 @@ function SamboCharacter({ beltColor, size = 150, glow = false, gear = {}, mood, 
 export default function SamboHero() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [schedule, setSchedule] = useState({ days: [1, 3, 5] });
   const [tab, setTab] = useState("home");
   const [fxQueue, setFxQueue] = useState([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -335,9 +357,21 @@ export default function SamboHero() {
     tg?.ready();
     tg?.expand();
     try { tg?.setHeaderColor("#0b1d3a"); tg?.setBackgroundColor("#0b1d3a"); } catch (e) {}
+    let cancelled = false;
     (async () => {
       try {
+        // публичный конфиг расписания (не критичен — при сбое остаёмся на дефолте)
+        try {
+          const cfg = await fetch("/api/config").then((r) => (r.ok ? r.json() : null));
+          if (cfg?.scheduleDays?.length) {
+            scheduleDays = cfg.scheduleDays;
+            if (!cancelled) setSchedule({ days: cfg.scheduleDays });
+          }
+        } catch (e) { /* конфиг не загрузился — используем дефолт */ }
+
         const data = await apiState("GET");
+        if (cancelled) return;
+        setLoadError(false);
         if (data.state && Object.keys(data.state).length) {
           const parsed = data.state;
           if (parsed.onboarded === undefined && (parsed.trainings || []).length > 0) parsed.onboarded = true;
@@ -353,10 +387,14 @@ export default function SamboHero() {
           const tgName = tg?.initDataUnsafe?.user?.first_name;
           if (tgName) setState((s) => ({ ...s, name: tgName }));
         }
-      } catch (e) { /* оффлайн или первый запуск */ }
-      setLoaded(true);
+        setLoaded(true);
+      } catch (e) {
+        // ошибка сети/авторизации: НЕ сохраняем дефолтное состояние, показываем ретрай
+        if (!cancelled) setLoadError(true);
+      }
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   // сохранение на сервер (с дебаунсом)
   useEffect(() => {
@@ -388,14 +426,14 @@ export default function SamboHero() {
 
   const level = getLevel(state.xp);
   const dispXp = useCountUp(state.xp);
-  const streak = getStreak(state.trainings);
-  const bestStreak = getBestStreak(state.trainings);
-  const todayIsTraining = isTrainingDay();
+  const streak = getStreak(state.trainings, schedule.days);
+  const bestStreak = getBestStreak(state.trainings, schedule.days);
+  const todayIsTraining = isTrainingDay(new Date(), schedule.days);
   var pullStageIdx = Math.min(state.pullStageIdx||0, PULLUP_PROGRAM.length-1);
   var pullStage = PULLUP_PROGRAM[pullStageIdx];
   var pullStageSessions = state.pullStageSessions||0;
   var morningDoneToday = (state.morningDone||[]).includes(todayStr());
-  var thisWeek = new Date().getFullYear()+"-W"+weekNum();
+  var thisWeek = "W" + dateToStr(mondayOfWeek());
   var burpeeDoneThisWeek = (state.burpeeDone||[]).includes(thisWeek);
   var burpeeReps = BURPEE_START + Math.floor((state.burpeeDone||[]).length/4)*BURPEE_STEP;
   const trainedToday = state.trainings.includes(todayStr());
@@ -413,7 +451,7 @@ export default function SamboHero() {
   const dailyDoneToday = state.dailyDone.includes(todayStr());
   const gear = {
     boots: state.trainings.length >= 25,
-    gloves: getBestStreak(state.trainings) >= 14,
+    gloves: getBestStreak(state.trainings, schedule.days) >= 14,
     patch: state.competitions.length >= 1,
     aura: level.idx >= 4,
   };
@@ -423,7 +461,7 @@ export default function SamboHero() {
     const newXp = s.xp + amount;
     const before = getLevel(s.xp).idx;
     const after = getLevel(newXp).idx;
-    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length, mornings:(s.morningDone||[]).length, pullStage:s.pullStageIdx||0, burpees:(s.burpeeDone||[]).length, ...extraCtx };
+    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings, schedule.days), levelIdx: after, comps: s.competitions.length, mornings:(s.morningDone||[]).length, pullStage:s.pullStageIdx||0, burpees:(s.burpeeDone||[]).length, ...extraCtx };
     const newAchs = checkNewAchievements(ctx, s.achievements);
     const queue = [{ type: "xp", amount }];
     if (after > before) queue.push({ type: "levelup", level: LEVELS[after] });
@@ -458,7 +496,7 @@ export default function SamboHero() {
     const chest = rollChest();
     const bonus = chest?.kind === "xp2" ? XP_PER_TRAINING : 0;
     const newTrainings = [...state.trainings, todayStr()];
-    const { newXp, newAchs, queue } = applyXp(state, XP_PER_TRAINING + bonus, { total: newTrainings.length, streak: getStreak(newTrainings) });
+    const { newXp, newAchs, queue } = applyXp(state, XP_PER_TRAINING + bonus, { total: newTrainings.length, streak: getStreak(newTrainings, schedule.days) });
     if (chest) queue.splice(1, 0, { type: "chest", chest });
     setState((s) => ({
       ...s,
@@ -513,7 +551,7 @@ export default function SamboHero() {
       const newXp = done ? s.xp - xp : s.xp + xp;
       const before = getLevel(s.xp).idx;
       const after = getLevel(newXp).idx;
-      const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length };
+      const ctx = { total: s.trainings.length, streak: getStreak(s.trainings, schedule.days), levelIdx: after, comps: s.competitions.length };
       const newAchs = done ? [] : checkNewAchievements(ctx, s.achievements);
       if (!done) {
         const q = [{ type: "xp", amount: xp }];
@@ -554,8 +592,20 @@ export default function SamboHero() {
 
   if (!loaded)
     return (
-      <div style={{ ...st.app, display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <div style={{ color: "#facc15", fontSize: 18, fontWeight: 700 }}>🥋 Загрузка…</div>
+      <div style={{ ...st.app, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 14, padding: 24 }}>
+        <style>{css}</style>
+        {loadError ? (
+          <>
+            <div style={{ fontSize: 48 }}>📡</div>
+            <div style={{ color: "#fff", fontSize: 17, fontWeight: 800, textAlign: "center" }}>Не удалось загрузить прогресс</div>
+            <div style={{ color: "#94a3b8", fontSize: 13, textAlign: "center", lineHeight: 1.5 }}>
+              Проверь интернет и попробуй снова.<br />Открывай приложение через бота в Telegram.
+            </div>
+            <button style={st.claimBtn} onClick={() => { setLoadError(false); setReloadKey((k) => k + 1); }}>Повторить 🔄</button>
+          </>
+        ) : (
+          <div style={{ color: "#facc15", fontSize: 18, fontWeight: 700 }}>🥋 Загрузка…</div>
+        )}
       </div>
     );
 
@@ -810,7 +860,7 @@ export default function SamboHero() {
         )}
 
         {tab === "calendar" && (
-          <Calendar trainings={state.trainings} competitions={state.competitions} bestStreak={bestStreak} streak={streak} calMonth={calMonth} setCalMonth={setCalMonth} />
+          <Calendar trainings={state.trainings} competitions={state.competitions} bestStreak={bestStreak} streak={streak} calMonth={calMonth} setCalMonth={setCalMonth} scheduleDays={schedule.days} />
         )}
 
         {tab === "hero" && <HeroTab state={state} level={level} bestStreak={bestStreak} streak={streak} gear={gear} onLearnTechnique={learnTechnique} />}
@@ -931,7 +981,7 @@ function PinGate({ pin, onUnlock }) {
 }
 
 // ─── Календарь ───────────────────────────────────────────────
-function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, setCalMonth }) {
+function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, setCalMonth, scheduleDays = [1, 3, 5] }) {
   const set = new Set(trainings);
   const compSet = new Set(competitions.map((c) => c.date));
   const { y, m } = calMonth;
@@ -939,7 +989,7 @@ function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, 
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const today = todayStr();
   const todayDate = new Date(); todayDate.setHours(0,0,0,0);
-  const scheduled = getScheduledDays(y, m);
+  const scheduled = getScheduledDays(y, m, scheduleDays);
   const cells = [...Array(offset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   return (
     <div style={st.card}>
@@ -952,7 +1002,7 @@ function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
         {WEEKDAYS.map((w, i) => (
           <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700,
-            color: SCHEDULE_DAYS.includes(i + 1) ? "#60a5fa" : "#64748b" }}>{w}</div>
+            color: scheduleDays.includes(i + 1) ? "#60a5fa" : "#64748b" }}>{w}</div>
         ))}
         {cells.map((d, i) => {
           if (!d) return <div key={i} />;

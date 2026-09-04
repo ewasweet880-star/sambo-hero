@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import confetti from "canvas-confetti";
 
 // ─── Telegram WebApp + API ───────────────────────────────────
@@ -301,63 +301,159 @@ function plural(n, one, few, many) {
 }
 
 // ─── SVG-персонаж (пояс + экипировка растут с прогрессом) ────
-function SamboCharacter({ beltColor, size = 150, glow = false, gear = {}, mood, onTap }) {
-  var bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
+// Утилита: осветлить/затемнить hex-цвет (p от -1 до 1)
+function shade(hex, p) {
+  const n = String(hex).replace("#", "");
+  const full = n.length === 3 ? n.split("").map((c) => c + c).join("") : n;
+  const num = parseInt(full, 16);
+  let r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+  const t = p < 0 ? 0 : 255, amt = Math.abs(p);
+  r = Math.round(r + (t - r) * amt);
+  g = Math.round(g + (t - g) * amt);
+  b = Math.round(b + (t - b) * amt);
+  return `rgb(${r},${g},${b})`;
+}
+
+function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear = {}, mood, onTap }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const beltDark = shade(beltColor, -0.28);
+  const beltLight = shade(beltColor, 0.18);
+  const bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
   return (
-    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.45))" : "none" }}>
+    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.5))" : "none" }}>
+      <defs>
+        <linearGradient id={`skin${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#f7cda0" />
+          <stop offset="1" stopColor="#e5ad7f" />
+        </linearGradient>
+        <linearGradient id={`gi${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#f05353" />
+          <stop offset="1" stopColor="#b91c1c" />
+        </linearGradient>
+        <linearGradient id={`giIn${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#e4ebf4" />
+        </linearGradient>
+        <linearGradient id={`shorts${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#4d8bf8" />
+          <stop offset="1" stopColor="#1e4fd8" />
+        </linearGradient>
+        <linearGradient id={`hair${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6a4322" />
+          <stop offset="1" stopColor="#2e1a08" />
+        </linearGradient>
+        <linearGradient id={`boot${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ef4444" />
+          <stop offset="1" stopColor="#8f1414" />
+        </linearGradient>
+        <linearGradient id={`shoe${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1c2740" />
+          <stop offset="1" stopColor="#0b1120" />
+        </linearGradient>
+        <linearGradient id={`belt${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={beltLight} />
+          <stop offset="0.5" stopColor={beltColor} />
+          <stop offset="1" stopColor={beltDark} />
+        </linearGradient>
+      </defs>
+
       {/* золотая аура Мастера */}
       {gear.aura && (
-        <ellipse cx="80" cy="105" rx="72" ry="92" fill="none" stroke="#facc15" strokeWidth="3" opacity=".5" strokeDasharray="6 8" />
+        <g>
+          <ellipse cx="80" cy="100" rx="74" ry="94" fill="none" stroke="#facc15" strokeWidth="3" opacity=".42" strokeDasharray="7 9" />
+          <ellipse cx="80" cy="100" rx="66" ry="86" fill="none" stroke="#fde047" strokeWidth="1.4" opacity=".25" />
+        </g>
       )}
-      {/* тень */}
-      <ellipse cx="80" cy="192" rx="44" ry="7" fill="rgba(0,0,0,.35)" />
+
+      {/* тень на полу */}
+      <ellipse cx="80" cy="192" rx="47" ry="7" fill="rgba(0,0,0,.32)" />
+
       <g className={bodyCls}>
-      {/* ноги */}
-      <rect x="58" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
-      <rect x="86" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
-      {/* ступни: борцовки за 25 тренировок */}
-      <ellipse cx="66" cy="188" rx="12" ry="6" fill={gear.boots ? "#dc2626" : "#0f172a"} />
-      <ellipse cx="94" cy="188" rx="12" ry="6" fill={gear.boots ? "#dc2626" : "#0f172a"} />
-      {gear.boots && (
-        <>
-          <path d="M58 186 l16 0 M86 186 l16 0" stroke="#fff" strokeWidth="1.5" opacity=".8" />
-          <path d="M62 183 l8 0 M90 183 l8 0" stroke="#fff" strokeWidth="1.2" opacity=".6" />
-        </>
-      )}
-      {/* шорты */}
-      <path d="M54 128 h52 v18 q0 6 -6 6 h-40 q-6 0 -6 -6 z" fill="#2563eb" />
-      {/* куртка (самбовка) */}
-      <path d="M52 70 q28 -14 56 0 l6 52 q-34 12 -68 0 z" fill="#dc2626" />
-      {/* V-ворот */}
-      <path d="M80 68 l-12 26 12 14 12 -14 z" fill="#fff" opacity=".92" />
-      <path d="M80 68 l-12 26 12 14 12 -14 z" fill="none" stroke="#b91c1c" strokeWidth="2.5" />
-      {/* нашивка-звезда за первое соревнование */}
-      {gear.patch && (
-        <path d="M62 84 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z" fill="#facc15" stroke="#b45309" strokeWidth=".8" />
-      )}
-      {/* руки на поясе */}
-      <path d="M52 76 q-18 14 -10 36 q4 8 14 4 l8 -10" fill="#dc2626" />
-      <path d="M108 76 q18 14 10 36 q-4 8 -14 4 l-8 -10" fill="#dc2626" />
-      {/* кисти: перчатки за серию 14 */}
-      <circle cx="62" cy="112" r={gear.gloves ? 8.5 : 7.5} fill={gear.gloves ? "#1d4ed8" : "#f1c197"} stroke={gear.gloves ? "#0b1d3a" : "none"} strokeWidth={gear.gloves ? 1.5 : 0} />
-      <circle cx="98" cy="112" r={gear.gloves ? 8.5 : 7.5} fill={gear.gloves ? "#1d4ed8" : "#f1c197"} stroke={gear.gloves ? "#0b1d3a" : "none"} strokeWidth={gear.gloves ? 1.5 : 0} />
-      {/* пояс — цвет уровня */}
-      <rect x="50" y="114" width="60" height="11" rx="5" fill={beltColor} stroke="rgba(0,0,0,.25)" strokeWidth="1.5" />
-      <rect x="74" y="113" width="12" height="13" rx="3" fill={beltColor} stroke="rgba(0,0,0,.35)" strokeWidth="1.5" />
-      <path d="M76 126 l-7 16 M84 126 l7 16" stroke={beltColor} strokeWidth="6" strokeLinecap="round" />
-      {/* шея и голова */}
-      <rect x="73" y="56" width="14" height="14" rx="6" fill="#f1c197" />
-      <circle cx="80" cy="40" r="24" fill="#f6cda4" />
-      {/* волосы */}
-      <path d="M56 38 q2 -26 24 -26 q22 0 24 26 q-6 -12 -24 -12 q-18 0 -24 12z" fill="#5b3a1e" />
-      <path d="M58 30 q8 -10 22 -10 q14 0 22 10 q-4 -4 -22 -4 q-18 0 -22 4z" fill="#6f4a26" />
-      {/* лицо */}
-      <circle cx="71" cy="40" r="3" fill="#1f2937" />
-      <circle cx="89" cy="40" r="3" fill="#1f2937" />
-      <path d="M70 33 q1.5 -3 6 -2 M84 31 q4.5 -1 6 2" stroke="#3f2a14" strokeWidth="2" strokeLinecap="round" fill="none" />
-      <path d="M72 51 q8 6 16 0" stroke="#b45309" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-      <circle cx="64" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
-      <circle cx="96" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
+        {/* ноги */}
+        <rect x="59" y="146" width="17" height="40" rx="8" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+        <rect x="84" y="146" width="17" height="40" rx="8" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* ступни / борцовки */}
+        <ellipse cx="66" cy="188" rx="13" ry="6.5" fill={gear.boots ? `url(#boot${uid})` : `url(#shoe${uid})`} stroke="rgba(0,0,0,.28)" />
+        <ellipse cx="94" cy="188" rx="13" ry="6.5" fill={gear.boots ? `url(#boot${uid})` : `url(#shoe${uid})`} stroke="rgba(0,0,0,.28)" />
+        {gear.boots && (
+          <>
+            <path d="M56 187 l20 0 M58 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+            <path d="M84 187 l20 0 M88 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+          </>
+        )}
+
+        {/* шорты */}
+        <path d="M54 124 L106 124 L110 150 Q110 158 102 158 L58 158 Q50 158 50 150 Z" fill={`url(#shorts${uid})`} stroke="rgba(0,0,0,.16)" />
+        <path d="M58 154 Q80 160 102 154" stroke="rgba(0,0,0,.12)" strokeWidth="2" fill="none" />
+
+        {/* куртка (самбовка) */}
+        <path d="M47 78 C50 62 60 54 80 54 C100 54 110 62 113 78 L117 122 C117 128 113 130 105 130 L55 130 C47 130 43 128 43 122 Z" fill={`url(#gi${uid})`} stroke="rgba(0,0,0,.16)" />
+
+        {/* V-ворот (внутренняя часть) */}
+        <path d="M80 56 L62 88 L98 88 Z" fill={`url(#giIn${uid})`} stroke="#b91c1c" strokeWidth="2" strokeLinejoin="round" />
+
+        {/* складки куртки */}
+        <path d="M64 96 Q66 108 62 120" stroke="rgba(0,0,0,.08)" strokeWidth="2" fill="none" />
+        <path d="M96 96 Q94 108 98 120" stroke="rgba(0,0,0,.08)" strokeWidth="2" fill="none" />
+        <path d="M50 82 Q47 102 50 120" stroke="rgba(255,255,255,.14)" strokeWidth="2" fill="none" />
+
+        {/* нашивка-звезда за первое соревнование */}
+        {gear.patch && (
+          <path d="M61 82 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z" fill="#facc15" stroke="#b45309" strokeWidth=".8" />
+        )}
+
+        {/* руки (рукава) */}
+        <path d="M47 80 Q32 104 60 112" stroke="rgba(0,0,0,.15)" strokeWidth="21" strokeLinecap="round" fill="none" />
+        <path d="M47 80 Q32 104 60 112" stroke={`url(#gi${uid})`} strokeWidth="18" strokeLinecap="round" fill="none" />
+        <path d="M113 80 Q128 104 100 112" stroke="rgba(0,0,0,.15)" strokeWidth="21" strokeLinecap="round" fill="none" />
+        <path d="M113 80 Q128 104 100 112" stroke={`url(#gi${uid})`} strokeWidth="18" strokeLinecap="round" fill="none" />
+
+        {/* манжеты перчаток */}
+        {gear.gloves && (
+          <>
+            <rect x="52" y="119" width="16" height="6" rx="3" fill="#e2e8f0" stroke="rgba(0,0,0,.15)" />
+            <rect x="92" y="119" width="16" height="6" rx="3" fill="#e2e8f0" stroke="rgba(0,0,0,.15)" />
+          </>
+        )}
+
+        {/* кисти (кулаки) */}
+        <circle cx="60" cy="114" r="8" fill={gear.gloves ? "#1d4ed8" : `url(#skin${uid})`} stroke={gear.gloves ? "#0b1d3a" : "rgba(0,0,0,.12)"} strokeWidth={gear.gloves ? 1.5 : 1} />
+        <circle cx="100" cy="114" r="8" fill={gear.gloves ? "#1d4ed8" : `url(#skin${uid})`} stroke={gear.gloves ? "#0b1d3a" : "rgba(0,0,0,.12)"} strokeWidth={gear.gloves ? 1.5 : 1} />
+        <path d="M56 112 q2 2 5 0 M95 112 q2 2 5 0" stroke="rgba(0,0,0,.18)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+
+        {/* пояс — цвет уровня */}
+        <rect x="49" y="117" width="62" height="12" rx="6" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
+        <rect x="53" y="120" width="54" height="3.5" rx="1.75" fill="rgba(255,255,255,.45)" />
+        <rect x="72" y="116" width="16" height="14" rx="4" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
+        <rect x="71" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
+        <rect x="81" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
+
+        {/* шея */}
+        <rect x="72" y="60" width="16" height="16" rx="6" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* голова */}
+        <circle cx="54.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
+        <circle cx="105.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
+        <circle cx="80" cy="43" r="25" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* волосы */}
+        <path d="M55 46 C50 22 62 11 80 11 C98 11 110 22 105 46 C103 33 93 29 80 29 C67 29 57 33 55 46 Z" fill={`url(#hair${uid})`} stroke="rgba(0,0,0,.18)" />
+        <path d="M55 44 C60 34 70 32 80 32 C90 32 100 34 105 44 C97 40 90 38 80 38 C70 38 63 40 55 44 Z" fill="#3a240e" />
+        <path d="M60 24 Q80 13 100 24" stroke="#8a5a2e" strokeWidth="3" strokeLinecap="round" fill="none" opacity=".7" />
+
+        {/* лицо */}
+        <path d="M64 42 Q70 39 76 42" stroke="#3a240e" strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        <path d="M84 42 Q90 39 96 42" stroke="#3a240e" strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        <ellipse cx="70" cy="48" rx="3.4" ry="4.6" fill="#1e293b" />
+        <ellipse cx="90" cy="48" rx="3.4" ry="4.6" fill="#1e293b" />
+        <circle cx="71" cy="46.5" r="1.3" fill="#ffffff" />
+        <circle cx="91" cy="46.5" r="1.3" fill="#ffffff" />
+        <path d="M79 50 q1 4 2 0" stroke="#d99a6b" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+        <ellipse cx="63" cy="54" rx="4.2" ry="2.7" fill="#fb7185" opacity=".45" />
+        <ellipse cx="97" cy="54" rx="4.2" ry="2.7" fill="#fb7185" opacity=".45" />
+        <path d="M72 56 Q80 63 88 56 Z" fill="#8b1d1d" />
+        <path d="M75 58 Q80 60.5 85 58 Z" fill="#fb7185" />
       </g>
     </svg>
   );

@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import confetti from "canvas-confetti";
 
 // ─── Telegram WebApp + API ───────────────────────────────────
 const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
+// вне Telegram (обычный браузер) показываем демо-режим с примером прогресса
+const isDemo = !tg;
 async function apiState(method, state) {
   const res = await fetch("/api/state", {
     method,
@@ -162,26 +164,33 @@ function getLevel(xp) {
   return { idx, cur, next, progress: next ? (xp - cur.xp) / (next.xp - cur.xp) : 1 };
 }
 // ─── Расписание тренировок ───────────────────────────────────
-const SCHEDULE_DAYS = [1, 3, 5]; // 1=пн, 3=ср, 5=пт
-const SCHEDULE_TIME = "17:00"; // напоминание за 30 мин до начала (17:30)
+// Единый источник — сервер (/api/config). Значения ниже — только запасные
+// до загрузки конфига; при загрузке переменная перезаписывается.
+let scheduleDays = [1, 3, 5]; // 1=пн, 3=ср, 5=пт
 
-function isTrainingDay(date = new Date()) {
-  return SCHEDULE_DAYS.includes(date.getDay() === 0 ? 7 : date.getDay());
+function isTrainingDay(date = new Date(), days = scheduleDays) {
+  return days.includes(date.getDay() === 0 ? 7 : date.getDay());
 }
 
 // Получить все тренировочные дни в диапазоне дат (для календаря)
-function getScheduledDays(year, month) {
-  const days = [];
+function getScheduledDays(year, month, days = scheduleDays) {
+  const result = [];
   const d = new Date(year, month, 1);
   while (d.getMonth() === month) {
-    if (isTrainingDay(d)) days.push(d.getDate());
+    if (isTrainingDay(d, days)) result.push(d.getDate());
     d.setDate(d.getDate() + 1);
   }
-  return new Set(days);
+  return new Set(result);
 }
 
-// Серия = тренировки подряд без пропуска тренировочного дня
-function weekNum(d) { var dt=d||new Date(); return Math.floor((dt-new Date(dt.getFullYear(),0,1))/604800000); }
+// Неделя для «Бёрпи недели»: начинается с понедельника.
+// Ключ — дата понедельника текущей недели (однозначно и без сдвигов по TZ).
+function mondayOfWeek(d = new Date()) {
+  const dt = new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+  return dt;
+}
 function useCountUp(target) {
   const [val, setVal] = useState(target);
   const prev = useRef(target);
@@ -201,7 +210,7 @@ function useCountUp(target) {
   }, [target]);
   return val;
 }
-function getStreak(trainings) {
+function getStreak(trainings, days = scheduleDays) {
   const set = new Set(trainings);
   // строим список всех прошедших тренировочных дней в обратном порядке
   const today = new Date();
@@ -212,7 +221,7 @@ function getStreak(trainings) {
   // (серия не обнуляется в день тренировки до её начала)
   let started = false;
   for (let i = 0; i < 365; i++) {
-    if (isTrainingDay(d)) {
+    if (isTrainingDay(d, days)) {
       const ds = dateToStr(d);
       if (set.has(ds)) {
         streak++;
@@ -229,12 +238,24 @@ function getStreak(trainings) {
   }
   return streak;
 }
-function getBestStreak(trainings) {
-  const sorted = [...trainings].sort();
-  let best = 0, cur = 0, prev = null;
-  for (const s of sorted) {
+// Лучшая серия = максимум тренировок подряд по тренировочным дням
+// (не по календарным — между пн и ср всегда 2 дня).
+function getBestStreak(trainings, days = scheduleDays) {
+  const set = new Set(trainings);
+  const all = [...set].sort();
+  let best = 0, cur = 0;
+  let prev = null; // предыдущая дата в серии (Date)
+  for (const s of all) {
     const d = new Date(s + "T00:00:00");
-    cur = prev && d - prev === 86400000 ? cur + 1 : 1;
+    if (prev) {
+      // следующий тренировочный день после prev
+      const nd = new Date(prev);
+      nd.setDate(nd.getDate() + 1);
+      while (!isTrainingDay(nd, days)) nd.setDate(nd.getDate() + 1);
+      cur = dateToStr(d) === dateToStr(nd) ? cur + 1 : 1;
+    } else {
+      cur = 1;
+    }
     best = Math.max(best, cur);
     prev = d;
   }
@@ -242,6 +263,35 @@ function getBestStreak(trainings) {
 }
 function checkNewAchievements(ctx, unlocked) {
   return ACHIEVEMENTS.filter((a) => !unlocked.includes(a.id) && a.cond(ctx));
+}
+// Демо-состояние для просмотра вне Telegram (прогресс не сохраняется)
+function demoState() {
+  const trainings = [];
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - 1); // начинаем со вчера, чтобы серия не зависела от отметки «сегодня»
+  while (trainings.length < 8) {
+    if (isTrainingDay(d)) trainings.push(dateToStr(d));
+    d.setDate(d.getDate() - 1);
+  }
+  return {
+    onboarded: true,
+    name: "Даня",
+    xp: 1450,
+    trainings,
+    missionsDone: ["m1", "m3"],
+    achievements: ["t1", "t10", "s3", "l2", "l3"],
+    competitions: [{ date: "2026-08-29", place: 2 }],
+    dailyDone: [],
+    stats: { str: 24, end: 18, tech: 16 },
+    stickers: ["🦁", "⚡", "🔥"],
+    techniques: ["k1", "k2", "k3", "k4"],
+    morningDone: [],
+    pullStageIdx: 2,
+    pullStageSessions: 3,
+    burpeeDone: [],
+    reward: { title: "Поход в кино", cost: 10, claimed: 0 },
+  };
 }
 function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;
@@ -251,72 +301,265 @@ function plural(n, one, few, many) {
 }
 
 // ─── SVG-персонаж (пояс + экипировка растут с прогрессом) ────
-function SamboCharacter({ beltColor, size = 150, glow = false, gear = {}, mood, onTap }) {
-  var bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
+// Утилита: осветлить/затемнить hex-цвет (p от -1 до 1)
+function shade(hex, p) {
+  const n = String(hex).replace("#", "");
+  const full = n.length === 3 ? n.split("").map((c) => c + c).join("") : n;
+  const num = parseInt(full, 16);
+  let r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+  const t = p < 0 ? 0 : 255, amt = Math.abs(p);
+  r = Math.round(r + (t - r) * amt);
+  g = Math.round(g + (t - g) * amt);
+  b = Math.round(b + (t - b) * amt);
+  return `rgb(${r},${g},${b})`;
+}
+
+function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear = {}, mood, onTap }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const beltDark = shade(beltColor, -0.28);
+  const beltLight = shade(beltColor, 0.18);
+  const bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
   return (
-    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.45))" : "none" }}>
+    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.5))" : "none" }}>
+      <defs>
+        <linearGradient id={`skin${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#f7cda0" />
+          <stop offset="1" stopColor="#e5ad7f" />
+        </linearGradient>
+        <linearGradient id={`gi${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#f05353" />
+          <stop offset="1" stopColor="#b91c1c" />
+        </linearGradient>
+        <linearGradient id={`giIn${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#e4ebf4" />
+        </linearGradient>
+        <linearGradient id={`shorts${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#4d8bf8" />
+          <stop offset="1" stopColor="#1e4fd8" />
+        </linearGradient>
+        <linearGradient id={`hair${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6a4322" />
+          <stop offset="1" stopColor="#2e1a08" />
+        </linearGradient>
+        <linearGradient id={`boot${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ef4444" />
+          <stop offset="1" stopColor="#8f1414" />
+        </linearGradient>
+        <linearGradient id={`shoe${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1c2740" />
+          <stop offset="1" stopColor="#0b1120" />
+        </linearGradient>
+        <linearGradient id={`belt${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={beltLight} />
+          <stop offset="0.5" stopColor={beltColor} />
+          <stop offset="1" stopColor={beltDark} />
+        </linearGradient>
+      </defs>
+
       {/* золотая аура Мастера */}
       {gear.aura && (
-        <ellipse cx="80" cy="105" rx="72" ry="92" fill="none" stroke="#facc15" strokeWidth="3" opacity=".5" strokeDasharray="6 8" />
+        <g>
+          <ellipse cx="80" cy="100" rx="74" ry="94" fill="none" stroke="#facc15" strokeWidth="3" opacity=".42" strokeDasharray="7 9" />
+          <ellipse cx="80" cy="100" rx="66" ry="86" fill="none" stroke="#fde047" strokeWidth="1.4" opacity=".25" />
+        </g>
       )}
-      {/* тень */}
-      <ellipse cx="80" cy="192" rx="44" ry="7" fill="rgba(0,0,0,.35)" />
+
+      {/* тень на полу */}
+      <ellipse cx="80" cy="192" rx="47" ry="7" fill="rgba(0,0,0,.32)" />
+
       <g className={bodyCls}>
-      {/* ноги */}
-      <rect x="58" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
-      <rect x="86" y="148" width="16" height="38" rx="7" fill="#1e3a8a" />
-      {/* ступни: борцовки за 25 тренировок */}
-      <ellipse cx="66" cy="188" rx="12" ry="6" fill={gear.boots ? "#dc2626" : "#0f172a"} />
-      <ellipse cx="94" cy="188" rx="12" ry="6" fill={gear.boots ? "#dc2626" : "#0f172a"} />
-      {gear.boots && (
-        <>
-          <path d="M58 186 l16 0 M86 186 l16 0" stroke="#fff" strokeWidth="1.5" opacity=".8" />
-          <path d="M62 183 l8 0 M90 183 l8 0" stroke="#fff" strokeWidth="1.2" opacity=".6" />
-        </>
-      )}
-      {/* шорты */}
-      <path d="M54 128 h52 v18 q0 6 -6 6 h-40 q-6 0 -6 -6 z" fill="#2563eb" />
-      {/* куртка (самбовка) */}
-      <path d="M52 70 q28 -14 56 0 l6 52 q-34 12 -68 0 z" fill="#dc2626" />
-      {/* V-ворот */}
-      <path d="M80 68 l-12 26 12 14 12 -14 z" fill="#fff" opacity=".92" />
-      <path d="M80 68 l-12 26 12 14 12 -14 z" fill="none" stroke="#b91c1c" strokeWidth="2.5" />
-      {/* нашивка-звезда за первое соревнование */}
-      {gear.patch && (
-        <path d="M62 84 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z" fill="#facc15" stroke="#b45309" strokeWidth=".8" />
-      )}
-      {/* руки на поясе */}
-      <path d="M52 76 q-18 14 -10 36 q4 8 14 4 l8 -10" fill="#dc2626" />
-      <path d="M108 76 q18 14 10 36 q-4 8 -14 4 l-8 -10" fill="#dc2626" />
-      {/* кисти: перчатки за серию 14 */}
-      <circle cx="62" cy="112" r={gear.gloves ? 8.5 : 7.5} fill={gear.gloves ? "#1d4ed8" : "#f1c197"} stroke={gear.gloves ? "#0b1d3a" : "none"} strokeWidth={gear.gloves ? 1.5 : 0} />
-      <circle cx="98" cy="112" r={gear.gloves ? 8.5 : 7.5} fill={gear.gloves ? "#1d4ed8" : "#f1c197"} stroke={gear.gloves ? "#0b1d3a" : "none"} strokeWidth={gear.gloves ? 1.5 : 0} />
-      {/* пояс — цвет уровня */}
-      <rect x="50" y="114" width="60" height="11" rx="5" fill={beltColor} stroke="rgba(0,0,0,.25)" strokeWidth="1.5" />
-      <rect x="74" y="113" width="12" height="13" rx="3" fill={beltColor} stroke="rgba(0,0,0,.35)" strokeWidth="1.5" />
-      <path d="M76 126 l-7 16 M84 126 l7 16" stroke={beltColor} strokeWidth="6" strokeLinecap="round" />
-      {/* шея и голова */}
-      <rect x="73" y="56" width="14" height="14" rx="6" fill="#f1c197" />
-      <circle cx="80" cy="40" r="24" fill="#f6cda4" />
-      {/* волосы */}
-      <path d="M56 38 q2 -26 24 -26 q22 0 24 26 q-6 -12 -24 -12 q-18 0 -24 12z" fill="#5b3a1e" />
-      <path d="M58 30 q8 -10 22 -10 q14 0 22 10 q-4 -4 -22 -4 q-18 0 -22 4z" fill="#6f4a26" />
-      {/* лицо */}
-      <circle cx="71" cy="40" r="3" fill="#1f2937" />
-      <circle cx="89" cy="40" r="3" fill="#1f2937" />
-      <path d="M70 33 q1.5 -3 6 -2 M84 31 q4.5 -1 6 2" stroke="#3f2a14" strokeWidth="2" strokeLinecap="round" fill="none" />
-      <path d="M72 51 q8 6 16 0" stroke="#b45309" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-      <circle cx="64" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
-      <circle cx="96" cy="47" r="3.5" fill="#f9a8a8" opacity=".55" />
+        {/* ноги */}
+        <rect x="59" y="146" width="17" height="40" rx="8" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+        <rect x="84" y="146" width="17" height="40" rx="8" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* ступни / борцовки */}
+        <ellipse cx="66" cy="188" rx="13" ry="6.5" fill={gear.boots ? `url(#boot${uid})` : `url(#shoe${uid})`} stroke="rgba(0,0,0,.28)" />
+        <ellipse cx="94" cy="188" rx="13" ry="6.5" fill={gear.boots ? `url(#boot${uid})` : `url(#shoe${uid})`} stroke="rgba(0,0,0,.28)" />
+        {gear.boots && (
+          <>
+            <path d="M56 187 l20 0 M58 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+            <path d="M84 187 l20 0 M88 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+          </>
+        )}
+
+        {/* шорты */}
+        <path d="M54 124 L106 124 L110 150 Q110 158 102 158 L58 158 Q50 158 50 150 Z" fill={`url(#shorts${uid})`} stroke="rgba(0,0,0,.16)" />
+        <path d="M58 154 Q80 160 102 154" stroke="rgba(0,0,0,.12)" strokeWidth="2" fill="none" />
+
+        {/* куртка (самбовка) */}
+        <path d="M47 78 C50 62 60 54 80 54 C100 54 110 62 113 78 L117 122 C117 128 113 130 105 130 L55 130 C47 130 43 128 43 122 Z" fill={`url(#gi${uid})`} stroke="rgba(0,0,0,.16)" />
+
+        {/* V-ворот (внутренняя часть) */}
+        <path d="M80 56 L62 88 L98 88 Z" fill={`url(#giIn${uid})`} stroke="#b91c1c" strokeWidth="2" strokeLinejoin="round" />
+
+        {/* складки куртки */}
+        <path d="M64 96 Q66 108 62 120" stroke="rgba(0,0,0,.08)" strokeWidth="2" fill="none" />
+        <path d="M96 96 Q94 108 98 120" stroke="rgba(0,0,0,.08)" strokeWidth="2" fill="none" />
+        <path d="M50 82 Q47 102 50 120" stroke="rgba(255,255,255,.14)" strokeWidth="2" fill="none" />
+
+        {/* нашивка-звезда за первое соревнование */}
+        {gear.patch && (
+          <path d="M61 82 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z" fill="#facc15" stroke="#b45309" strokeWidth=".8" />
+        )}
+
+        {/* руки (рукава) */}
+        <path d="M47 80 Q32 104 60 112" stroke="rgba(0,0,0,.15)" strokeWidth="21" strokeLinecap="round" fill="none" />
+        <path d="M47 80 Q32 104 60 112" stroke={`url(#gi${uid})`} strokeWidth="18" strokeLinecap="round" fill="none" />
+        <path d="M113 80 Q128 104 100 112" stroke="rgba(0,0,0,.15)" strokeWidth="21" strokeLinecap="round" fill="none" />
+        <path d="M113 80 Q128 104 100 112" stroke={`url(#gi${uid})`} strokeWidth="18" strokeLinecap="round" fill="none" />
+
+        {/* манжеты перчаток */}
+        {gear.gloves && (
+          <>
+            <rect x="52" y="119" width="16" height="6" rx="3" fill="#e2e8f0" stroke="rgba(0,0,0,.15)" />
+            <rect x="92" y="119" width="16" height="6" rx="3" fill="#e2e8f0" stroke="rgba(0,0,0,.15)" />
+          </>
+        )}
+
+        {/* кисти (кулаки) */}
+        <circle cx="60" cy="114" r="8" fill={gear.gloves ? "#1d4ed8" : `url(#skin${uid})`} stroke={gear.gloves ? "#0b1d3a" : "rgba(0,0,0,.12)"} strokeWidth={gear.gloves ? 1.5 : 1} />
+        <circle cx="100" cy="114" r="8" fill={gear.gloves ? "#1d4ed8" : `url(#skin${uid})`} stroke={gear.gloves ? "#0b1d3a" : "rgba(0,0,0,.12)"} strokeWidth={gear.gloves ? 1.5 : 1} />
+        <path d="M56 112 q2 2 5 0 M95 112 q2 2 5 0" stroke="rgba(0,0,0,.18)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+
+        {/* пояс — цвет уровня */}
+        <rect x="49" y="117" width="62" height="12" rx="6" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
+        <rect x="53" y="120" width="54" height="3.5" rx="1.75" fill="rgba(255,255,255,.45)" />
+        <rect x="72" y="116" width="16" height="14" rx="4" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
+        <rect x="71" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
+        <rect x="81" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
+
+        {/* шея */}
+        <rect x="72" y="60" width="16" height="16" rx="6" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* голова */}
+        <circle cx="54.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
+        <circle cx="105.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
+        <circle cx="80" cy="43" r="25" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+
+        {/* волосы */}
+        <path d="M55 46 C50 22 62 11 80 11 C98 11 110 22 105 46 C103 33 93 29 80 29 C67 29 57 33 55 46 Z" fill={`url(#hair${uid})`} stroke="rgba(0,0,0,.18)" />
+        <path d="M55 44 C60 34 70 32 80 32 C90 32 100 34 105 44 C97 40 90 38 80 38 C70 38 63 40 55 44 Z" fill="#3a240e" />
+        <path d="M60 24 Q80 13 100 24" stroke="#8a5a2e" strokeWidth="3" strokeLinecap="round" fill="none" opacity=".7" />
+
+        {/* лицо */}
+        <path d="M64 42 Q70 39 76 42" stroke="#3a240e" strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        <path d="M84 42 Q90 39 96 42" stroke="#3a240e" strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        <ellipse cx="70" cy="48" rx="3.4" ry="4.6" fill="#1e293b" />
+        <ellipse cx="90" cy="48" rx="3.4" ry="4.6" fill="#1e293b" />
+        <circle cx="71" cy="46.5" r="1.3" fill="#ffffff" />
+        <circle cx="91" cy="46.5" r="1.3" fill="#ffffff" />
+        <path d="M79 50 q1 4 2 0" stroke="#d99a6b" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+        <ellipse cx="63" cy="54" rx="4.2" ry="2.7" fill="#fb7185" opacity=".45" />
+        <ellipse cx="97" cy="54" rx="4.2" ry="2.7" fill="#fb7185" opacity=".45" />
+        <path d="M72 56 Q80 63 88 56 Z" fill="#8b1d1d" />
+        <path d="M75 58 Q80 60.5 85 58 Z" fill="#fb7185" />
       </g>
     </svg>
   );
+}
+
+// ─── 3D-наклон за пальцем (parallax) ─────────────────────────
+function Tilt3D({ children, max = 14, style }) {
+  const ref = useRef(null);
+  const reduced = useRef(false);
+  useEffect(() => {
+    try { reduced.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+  }, []);
+  const apply = (e) => {
+    if (reduced.current) return;
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    el.style.transform = `rotateY(${(px * max).toFixed(2)}deg) rotateX(${(-py * max).toFixed(2)}deg)`;
+  };
+  const reset = () => { const el = ref.current; if (el) el.style.transform = "rotateY(0deg) rotateX(0deg)"; };
+  return (
+    <div style={{ perspective: "640px" }}>
+      <div
+        ref={ref}
+        className="sh-tilt"
+        onPointerMove={apply}
+        onPointerLeave={reset}
+        onPointerUp={reset}
+        onPointerCancel={reset}
+        style={style}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Амбиентные золотые частицы (canvas, дёшево) ─────────────
+function Particles({ count = 20 }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    let reduced = false;
+    try { reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    if (reduced) return;
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let raf = 0, running = true, w = 0, h = 0;
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      w = r.width || canvas.parentElement?.clientWidth || 0;
+      h = r.height || canvas.parentElement?.clientHeight || 0;
+      canvas.width = Math.max(1, Math.round(w * DPR));
+      canvas.height = Math.max(1, Math.round(h * DPR));
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    };
+    resize();
+    const ps = Array.from({ length: count }, () => ({
+      x: Math.random() * (w || 300),
+      y: Math.random() * (h || 400),
+      r: 0.6 + Math.random() * 1.7,
+      vy: 0.15 + Math.random() * 0.35,
+      vx: (Math.random() - 0.5) * 0.15,
+      a: 0.12 + Math.random() * 0.35,
+      tw: Math.random() * Math.PI * 2,
+    }));
+    const tick = () => {
+      if (!running) return;
+      ctx.clearRect(0, 0, w, h);
+      for (const p of ps) {
+        p.y -= p.vy; p.x += p.vx; p.tw += 0.02;
+        if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+        if (p.x < -10) p.x = w + 10; else if (p.x > w + 10) p.x = -10;
+        const alpha = p.a * (0.6 + 0.4 * Math.sin(p.tw));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(253,224,71,${alpha.toFixed(3)})`;
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    const onVis = () => {
+      running = document.visibilityState === "visible";
+      if (running) raf = requestAnimationFrame(tick); else cancelAnimationFrame(raf);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("resize", resize);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("resize", resize);
+    };
+  }, [count]);
+  return <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 0 }} />;
 }
 
 // ─── Приложение ──────────────────────────────────────────────
 export default function SamboHero() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [schedule, setSchedule] = useState({ days: [1, 3, 5] });
   const [tab, setTab] = useState("home");
   const [fxQueue, setFxQueue] = useState([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -335,9 +578,27 @@ export default function SamboHero() {
     tg?.ready();
     tg?.expand();
     try { tg?.setHeaderColor("#0b1d3a"); tg?.setBackgroundColor("#0b1d3a"); } catch (e) {}
+    let cancelled = false;
+    // демо-режим (вне Telegram): показываем интерфейс с примером, без сети
+    if (isDemo) {
+      setState((s) => ({ ...s, ...demoState() }));
+      setLoaded(true);
+      return;
+    }
     (async () => {
       try {
+        // публичный конфиг расписания (не критичен — при сбое остаёмся на дефолте)
+        try {
+          const cfg = await fetch("/api/config").then((r) => (r.ok ? r.json() : null));
+          if (cfg?.scheduleDays?.length) {
+            scheduleDays = cfg.scheduleDays;
+            if (!cancelled) setSchedule({ days: cfg.scheduleDays });
+          }
+        } catch (e) { /* конфиг не загрузился — используем дефолт */ }
+
         const data = await apiState("GET");
+        if (cancelled) return;
+        setLoadError(false);
         if (data.state && Object.keys(data.state).length) {
           const parsed = data.state;
           if (parsed.onboarded === undefined && (parsed.trainings || []).length > 0) parsed.onboarded = true;
@@ -353,14 +614,18 @@ export default function SamboHero() {
           const tgName = tg?.initDataUnsafe?.user?.first_name;
           if (tgName) setState((s) => ({ ...s, name: tgName }));
         }
-      } catch (e) { /* оффлайн или первый запуск */ }
-      setLoaded(true);
+        setLoaded(true);
+      } catch (e) {
+        // ошибка сети/авторизации: НЕ сохраняем дефолтное состояние, показываем ретрай
+        if (!cancelled) setLoadError(true);
+      }
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   // сохранение на сервер (с дебаунсом)
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || isDemo) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try { await apiState("POST", state); } catch (e) {}
@@ -388,14 +653,14 @@ export default function SamboHero() {
 
   const level = getLevel(state.xp);
   const dispXp = useCountUp(state.xp);
-  const streak = getStreak(state.trainings);
-  const bestStreak = getBestStreak(state.trainings);
-  const todayIsTraining = isTrainingDay();
+  const streak = getStreak(state.trainings, schedule.days);
+  const bestStreak = getBestStreak(state.trainings, schedule.days);
+  const todayIsTraining = isTrainingDay(new Date(), schedule.days);
   var pullStageIdx = Math.min(state.pullStageIdx||0, PULLUP_PROGRAM.length-1);
   var pullStage = PULLUP_PROGRAM[pullStageIdx];
   var pullStageSessions = state.pullStageSessions||0;
   var morningDoneToday = (state.morningDone||[]).includes(todayStr());
-  var thisWeek = new Date().getFullYear()+"-W"+weekNum();
+  var thisWeek = "W" + dateToStr(mondayOfWeek());
   var burpeeDoneThisWeek = (state.burpeeDone||[]).includes(thisWeek);
   var burpeeReps = BURPEE_START + Math.floor((state.burpeeDone||[]).length/4)*BURPEE_STEP;
   const trainedToday = state.trainings.includes(todayStr());
@@ -413,7 +678,7 @@ export default function SamboHero() {
   const dailyDoneToday = state.dailyDone.includes(todayStr());
   const gear = {
     boots: state.trainings.length >= 25,
-    gloves: getBestStreak(state.trainings) >= 14,
+    gloves: getBestStreak(state.trainings, schedule.days) >= 14,
     patch: state.competitions.length >= 1,
     aura: level.idx >= 4,
   };
@@ -423,7 +688,7 @@ export default function SamboHero() {
     const newXp = s.xp + amount;
     const before = getLevel(s.xp).idx;
     const after = getLevel(newXp).idx;
-    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length, mornings:(s.morningDone||[]).length, pullStage:s.pullStageIdx||0, burpees:(s.burpeeDone||[]).length, ...extraCtx };
+    const ctx = { total: s.trainings.length, streak: getStreak(s.trainings, schedule.days), levelIdx: after, comps: s.competitions.length, mornings:(s.morningDone||[]).length, pullStage:s.pullStageIdx||0, burpees:(s.burpeeDone||[]).length, ...extraCtx };
     const newAchs = checkNewAchievements(ctx, s.achievements);
     const queue = [{ type: "xp", amount }];
     if (after > before) queue.push({ type: "levelup", level: LEVELS[after] });
@@ -458,7 +723,7 @@ export default function SamboHero() {
     const chest = rollChest();
     const bonus = chest?.kind === "xp2" ? XP_PER_TRAINING : 0;
     const newTrainings = [...state.trainings, todayStr()];
-    const { newXp, newAchs, queue } = applyXp(state, XP_PER_TRAINING + bonus, { total: newTrainings.length, streak: getStreak(newTrainings) });
+    const { newXp, newAchs, queue } = applyXp(state, XP_PER_TRAINING + bonus, { total: newTrainings.length, streak: getStreak(newTrainings, schedule.days) });
     if (chest) queue.splice(1, 0, { type: "chest", chest });
     setState((s) => ({
       ...s,
@@ -513,7 +778,7 @@ export default function SamboHero() {
       const newXp = done ? s.xp - xp : s.xp + xp;
       const before = getLevel(s.xp).idx;
       const after = getLevel(newXp).idx;
-      const ctx = { total: s.trainings.length, streak: getStreak(s.trainings), levelIdx: after, comps: s.competitions.length };
+      const ctx = { total: s.trainings.length, streak: getStreak(s.trainings, schedule.days), levelIdx: after, comps: s.competitions.length };
       const newAchs = done ? [] : checkNewAchievements(ctx, s.achievements);
       if (!done) {
         const q = [{ type: "xp", amount: xp }];
@@ -554,8 +819,20 @@ export default function SamboHero() {
 
   if (!loaded)
     return (
-      <div style={{ ...st.app, display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <div style={{ color: "#facc15", fontSize: 18, fontWeight: 700 }}>🥋 Загрузка…</div>
+      <div style={{ ...st.app, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 14, padding: 24 }}>
+        <style>{css}</style>
+        {loadError ? (
+          <>
+            <div style={{ fontSize: 48 }}>📡</div>
+            <div style={{ color: "#fff", fontSize: 17, fontWeight: 800, textAlign: "center" }}>Не удалось загрузить прогресс</div>
+            <div style={{ color: "#94a3b8", fontSize: 13, textAlign: "center", lineHeight: 1.5 }}>
+              Проверь интернет и попробуй снова.<br />Открывай приложение через бота в Telegram.
+            </div>
+            <button style={st.claimBtn} onClick={() => { setLoadError(false); setReloadKey((k) => k + 1); }}>Повторить 🔄</button>
+          </>
+        ) : (
+          <div style={{ color: "#facc15", fontSize: 18, fontWeight: 700 }}>🥋 Загрузка…</div>
+        )}
       </div>
     );
 
@@ -572,34 +849,38 @@ export default function SamboHero() {
   return (
     <div style={st.app}>
       <style>{css}</style>
+      <Particles count={20} />
 
       {/* ── Эффекты ── */}
       {fx && (
         <div style={st.fxOverlay}>
           {fx.type === "levelup" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <SamboCharacter beltColor={fx.level.beltColor} size={100} glow mood="levelup" />
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div style={{ position: "relative", width: 112, height: 136, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div className="sh-ring" style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px dashed rgba(250,204,21,.55)", boxShadow: "0 0 24px rgba(250,204,21,.25)" }} />
+                <SamboCharacter beltColor={fx.level.beltColor} size={100} glow mood="levelup" />
+              </div>
               <div style={{ fontSize: 24, fontWeight: 900, color: "#facc15", letterSpacing: 1 }}>НОВЫЙ УРОВЕНЬ!</div>
               <div style={{ fontSize: 19, fontWeight: 800, color: "#fff" }}>{fx.level.name}</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>Новый пояс: {fx.level.belt}</div>
             </div>
           ) : fx.type === "levelup_bar" ? (
-            <div className="sh-pop" style={st.fxCard}>
+            <div className="sh-fx3d" style={st.fxCard}>
               <div style={{fontSize:54}}>🤸</div>
               <div style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>НОВЫЙ ЭТАП!</div>
               <div style={{fontSize:20,fontWeight:900,color:"#facc15"}}>{fx.stage.label}</div>
               <div style={{fontSize:13,color:"#cbd5e1"}}>{fx.stage.desc}</div>
             </div>
           ) : fx.type === "chest" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <div className="sh-chest" style={{ fontSize: 50 }}>🎁</div>
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div className="sh-chest3d" style={{ fontSize: 50 }}>🎁</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#fb923c", letterSpacing: 2 }}>СУНДУК-СЮРПРИЗ!</div>
-              <div className="sh-prize" style={{ fontSize: 40 }}>{fx.chest.icon}</div>
+              <div className="sh-prize3d" style={{ fontSize: 40 }}>{fx.chest.icon}</div>
               <div style={{ fontSize: 17, fontWeight: 900, color: "#facc15", textAlign: "center" }}>{fx.chest.text}</div>
             </div>
           ) : fx.type === "achievement" ? (
-            <div className="sh-pop" style={st.fxCard}>
-              <div style={{ fontSize: 54 }}>{fx.ach.icon}</div>
+            <div className="sh-fx3d" style={st.fxCard}>
+              <div className="sh-ach-badge" style={{ fontSize: 54 }}>{fx.ach.icon}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#60a5fa", letterSpacing: 2 }}>ДОСТИЖЕНИЕ</div>
               <div style={{ fontSize: 20, fontWeight: 900, color: "#facc15" }}>«{fx.ach.title}»</div>
               <div style={{ color: "#cbd5e1", fontSize: 13 }}>{fx.ach.desc}</div>
@@ -662,7 +943,16 @@ export default function SamboHero() {
       )}
 
       {/* ── Контент ── */}
-      <div className="sh-stagger" style={st.scroll}>
+      {isDemo && (
+        <div style={{
+          position: "relative", zIndex: 1, flexShrink: 0,
+          background: "linear-gradient(90deg,#fb923c,#f59e0b)", color: "#2a1205",
+          fontSize: 12.5, fontWeight: 800, textAlign: "center", padding: "7px 10px",
+        }}>
+          👀 Демо-режим · прогресс не сохраняется
+        </div>
+      )}
+      <div className="sh-stagger" style={{ ...st.scroll, position: "relative", zIndex: 1 }}>
         {tab === "home" && (
           <>
             <div style={st.header}>
@@ -682,7 +972,7 @@ export default function SamboHero() {
               <div style={st.streakBox}>
                 <div style={{ fontSize: 22 }}>🔥</div>
                 <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", lineHeight: 1 }}>{streak}</div>
-                <div style={{ fontSize: 10, color: "#94a3b8" }}>серия</div>
+                <div style={{ fontSize: 11, color: "#94a3b8" }}>серия</div>
               </div>
             </div>
 
@@ -692,15 +982,31 @@ export default function SamboHero() {
                 <div style={st.heroChip}>
                   <div style={{ fontSize: 20 }}>⭐</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#facc15" }}>+{XP_PER_TRAINING} XP</div>
-                  <div style={{ fontSize: 10, color: "#cbd5e1" }}>за тренировку</div>
+                  <div style={{ fontSize: 11, color: "#cbd5e1" }}>за тренировку</div>
                 </div>
                 <div style={st.heroChip}>
                   <div style={{ width: 34, height: 10, borderRadius: 5, background: level.cur.beltColor, margin: "5px 0" }} />
-                  <div style={{ fontSize: 10, color: "#cbd5e1" }}>Твой пояс</div>
+                  <div style={{ fontSize: 11, color: "#cbd5e1" }}>Твой пояс</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: level.cur.beltColor }}>{level.cur.belt}</div>
                 </div>
               </div>
-              <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
+              <Tilt3D max={16} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+                <div className="sh-float" style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", transformStyle: "preserve-3d" }}>
+                  {/* софит над героем (ближе к зрителю) */}
+                  <div style={{
+                    position: "absolute", top: -6, width: 190, height: 190, borderRadius: "50%",
+                    background: "radial-gradient(circle, rgba(250,204,21,.22), transparent 68%)",
+                    pointerEvents: "none", transform: "translateZ(24px)",
+                  }} />
+                  {/* ковёр (татами) под героем (дальше от зрителя) */}
+                  <div style={{
+                    position: "absolute", bottom: 2, width: 150, height: 26, borderRadius: "50%",
+                    background: "radial-gradient(ellipse at center, rgba(250,204,21,.22), transparent 72%)",
+                    pointerEvents: "none", transform: "translateZ(-20px)",
+                  }} />
+                  <SamboCharacter beltColor={level.cur.beltColor} size={140} gear={gear} mood={heroMood} onTap={tapHero} />
+                </div>
+              </Tilt3D>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", textAlign: "center", marginTop: 4 }}>
                 {state.trainings.length === 0
                   ? "Твой путь начинается сегодня!"
@@ -800,7 +1106,7 @@ export default function SamboHero() {
                     <button key={m.id} onClick={() => toggleMission(m.id, m.xp)} style={{ ...st.mission, ...(done ? st.missionDone : {}) }}>
                       <div style={{ fontSize: 26 }}>{m.icon}</div>
                       <div style={{ fontSize: 11.5, fontWeight: 700, color: done ? "#4ade80" : "#e2e8f0", lineHeight: 1.3 }}>{m.text}</div>
-                      <div style={{ fontSize: 10, color: done ? "#4ade80" : "#facc15", fontWeight: 800 }}>{done ? "✅ +" + m.xp + " XP" : "+" + m.xp + " XP"}</div>
+                      <div style={{ fontSize: 11, color: done ? "#4ade80" : "#facc15", fontWeight: 800 }}>{done ? "✅ +" + m.xp + " XP" : "+" + m.xp + " XP"}</div>
                     </button>
                   );
                 })}
@@ -810,7 +1116,7 @@ export default function SamboHero() {
         )}
 
         {tab === "calendar" && (
-          <Calendar trainings={state.trainings} competitions={state.competitions} bestStreak={bestStreak} streak={streak} calMonth={calMonth} setCalMonth={setCalMonth} />
+          <Calendar trainings={state.trainings} competitions={state.competitions} bestStreak={bestStreak} streak={streak} calMonth={calMonth} setCalMonth={setCalMonth} scheduleDays={schedule.days} />
         )}
 
         {tab === "hero" && <HeroTab state={state} level={level} bestStreak={bestStreak} streak={streak} gear={gear} onLearnTechnique={learnTechnique} />}
@@ -831,8 +1137,8 @@ export default function SamboHero() {
           { id: "settings", icon: "🔒", label: "Родитель" },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...st.navBtn, ...(tab === t.id ? st.navBtnActive : {}) }}>
-            <div style={{ fontSize: 20 }}>{t.icon}</div>
-            <div style={{ fontSize: 10, fontWeight: 700 }}>{t.label}</div>
+            <div style={{ fontSize: 22, lineHeight: 1 }}>{t.icon}</div>
+            <div style={{ fontSize: 11, fontWeight: 800 }}>{t.label}</div>
           </button>
         ))}
       </div>
@@ -931,7 +1237,7 @@ function PinGate({ pin, onUnlock }) {
 }
 
 // ─── Календарь ───────────────────────────────────────────────
-function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, setCalMonth }) {
+function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, setCalMonth, scheduleDays = [1, 3, 5] }) {
   const set = new Set(trainings);
   const compSet = new Set(competitions.map((c) => c.date));
   const { y, m } = calMonth;
@@ -939,7 +1245,7 @@ function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, 
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const today = todayStr();
   const todayDate = new Date(); todayDate.setHours(0,0,0,0);
-  const scheduled = getScheduledDays(y, m);
+  const scheduled = getScheduledDays(y, m, scheduleDays);
   const cells = [...Array(offset).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   return (
     <div style={st.card}>
@@ -952,7 +1258,7 @@ function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
         {WEEKDAYS.map((w, i) => (
           <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700,
-            color: SCHEDULE_DAYS.includes(i + 1) ? "#60a5fa" : "#64748b" }}>{w}</div>
+            color: scheduleDays.includes(i + 1) ? "#60a5fa" : "#64748b" }}>{w}</div>
         ))}
         {cells.map((d, i) => {
           if (!d) return <div key={i} />;
@@ -1041,7 +1347,7 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
               <div key={g.key} style={{ ...st.achBox, opacity: got ? 1 : 0.4, border: got ? "1px solid rgba(250,204,21,.45)" : "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontSize: 24, filter: got ? "none" : "grayscale(1)" }}>{g.icon}</div>
                 <div style={{ fontSize: 11, fontWeight: 800, color: got ? "#facc15" : "#94a3b8" }}>{g.name}</div>
-                <div style={{ fontSize: 9.5, color: "#64748b" }}>{got ? "Надето на героя!" : "🔒 " + g.how}</div>
+                <div style={{ fontSize: 10.5, color: "#64748b" }}>{got ? "Надето на героя!" : "🔒 " + g.how}</div>
               </div>
             );
           })}
@@ -1064,8 +1370,8 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
                   opacity: got ? 1 : 0.5, border: got ? "1px solid rgba(96,165,250,.5)" : "1px dashed rgba(255,255,255,.2)",
                   background: got ? "rgba(96,165,250,.08)" : "rgba(0,0,0,.25)" }}>
                 <div style={{ fontSize: 24, filter: got ? "none" : "grayscale(1)" }}>{t.icon}</div>
-                <div style={{ fontSize: 10, fontWeight: 800, color: got ? "#60a5fa" : "#94a3b8", lineHeight: 1.2 }}>{t.name}</div>
-                <div style={{ fontSize: 9 }}>{got ? "✅" : "➕ изучить"}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: got ? "#60a5fa" : "#94a3b8", lineHeight: 1.2 }}>{t.name}</div>
+                <div style={{ fontSize: 10 }}>{got ? "✅" : "➕ изучить"}</div>
               </button>
             );
           })}
@@ -1125,8 +1431,8 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
             return (
               <div key={a.id} style={{ ...st.achBox, opacity: got ? 1 : 0.35, border: got ? "1px solid rgba(250,204,21,.45)" : "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontSize: 26, filter: got ? "none" : "grayscale(1)" }}>{a.icon}</div>
-                <div style={{ fontSize: 10.5, fontWeight: 800, color: got ? "#facc15" : "#94a3b8", lineHeight: 1.2 }}>{a.title}</div>
-                <div style={{ fontSize: 9, color: "#64748b", lineHeight: 1.2 }}>{got ? a.desc : "🔒 " + a.desc}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: got ? "#facc15" : "#94a3b8", lineHeight: 1.2 }}>{a.title}</div>
+                <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.2 }}>{got ? a.desc : "🔒 " + a.desc}</div>
               </div>
             );
           })}
@@ -1198,7 +1504,14 @@ function Settings({ state, setState, onLock }) {
 const st = {
   app: {
     minHeight: "100vh", maxWidth: 480, margin: "0 auto", position: "relative",
-    background: "linear-gradient(165deg,#0b1d3a 0%,#0e2a5c 45%,#091428 100%)",
+    background: [
+      "radial-gradient(110% 46% at 50% -8%, rgba(96,165,250,.20), transparent 60%)",
+      "radial-gradient(60% 30% at 100% 18%, rgba(250,204,21,.10), transparent 60%)",
+      "radial-gradient(70% 36% at -10% 62%, rgba(251,146,60,.10), transparent 60%)",
+      "repeating-linear-gradient(45deg, rgba(255,255,255,.014) 0 2px, transparent 2px 7px)",
+      "repeating-linear-gradient(-45deg, rgba(255,255,255,.014) 0 2px, transparent 2px 7px)",
+      "linear-gradient(165deg,#0b1d3a 0%,#0e2a5c 45%,#091428 100%)",
+    ].join(", "),
     fontFamily: "'Nunito','Segoe UI',system-ui,sans-serif",
     display: "flex", flexDirection: "column",
   },
@@ -1220,8 +1533,11 @@ const st = {
     border: "1px solid rgba(250,204,21,.25)", flexShrink: 0,
   },
   heroCard: {
-    background: "linear-gradient(180deg,rgba(30,58,110,.65),rgba(11,29,58,.85))",
-    border: "1px solid rgba(250,204,21,.18)", borderRadius: 22, padding: 16,
+    background: [
+      "radial-gradient(90% 70% at 50% 8%, rgba(250,204,21,.14), transparent 65%)",
+      "linear-gradient(180deg,rgba(30,58,110,.65),rgba(11,29,58,.85))",
+    ].join(", "),
+    border: "1px solid rgba(250,204,21,.22)", borderRadius: 22, padding: 16,
     display: "flex", flexDirection: "column", alignItems: "center",
     boxShadow: "0 12px 32px rgba(0,0,0,.35)",
   },
@@ -1230,9 +1546,10 @@ const st = {
     display: "flex", flexDirection: "column", alignItems: "center", minWidth: 86,
   },
   bigBtn: {
-    background: "linear-gradient(180deg,#fde047,#facc15)", color: "#1c1400",
-    fontSize: 17, fontWeight: 900, letterSpacing: 0.5, border: "none", borderRadius: 18,
-    padding: "18px 12px", cursor: "pointer", boxShadow: "0 10px 24px rgba(250,204,21,.35)",
+    background: "linear-gradient(180deg,#fde047,#fbbf24)", color: "#1c1400",
+    fontSize: 17, fontWeight: 900, letterSpacing: 0.5, border: "1px solid rgba(255,255,255,.35)",
+    borderRadius: 18, padding: "18px 12px", cursor: "pointer",
+    boxShadow: "0 12px 28px rgba(250,204,21,.40), inset 0 1px 0 rgba(255,255,255,.6)",
     fontFamily: "inherit",
   },
   bigBtnDone: { background: "rgba(74,222,128,.18)", color: "#4ade80", boxShadow: "none", border: "1px solid rgba(74,222,128,.4)", cursor: "default" },
@@ -1245,13 +1562,17 @@ const st = {
     border: "none", borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
   },
   card: {
-    background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)",
+    background: "linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02))",
+    border: "1px solid rgba(255,255,255,.10)",
     borderRadius: 20, padding: 16, display: "flex", flexDirection: "column", gap: 10,
+    boxShadow: "0 10px 28px rgba(0,0,0,.28)",
   },
   cardTitle: { fontSize: 14, fontWeight: 800, color: "#facc15", letterSpacing: 0.4, textTransform: "uppercase" },
   claimBtn: {
     background: "linear-gradient(180deg,#4ade80,#22c55e)", color: "#052e16", fontWeight: 900, fontSize: 15,
-    border: "none", borderRadius: 14, padding: "12px", cursor: "pointer", fontFamily: "inherit",
+    border: "1px solid rgba(255,255,255,.25)", borderRadius: 14, padding: "12px", cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(34,197,94,.35), inset 0 1px 0 rgba(255,255,255,.5)",
+    fontFamily: "inherit",
   },
   ghostBtn: {
     background: "rgba(255,255,255,.08)", color: "#e2e8f0", fontWeight: 800, fontSize: 15,
@@ -1285,16 +1606,20 @@ const st = {
     color: "#fff", padding: "11px 12px", fontSize: 15, fontFamily: "inherit", outline: "none",
   },
   nav: {
-    position: "absolute", bottom: 0, left: 0, right: 0, display: "flex",
+    position: "absolute", bottom: 0, left: 0, right: 0, display: "flex", zIndex: 2,
     background: "rgba(7,16,33,.95)", backdropFilter: "blur(10px)", borderTop: "1px solid rgba(255,255,255,.08)",
     padding: "8px 6px calc(8px + env(safe-area-inset-bottom))",
   },
   navBtn: {
     flex: 1, background: "none", border: "none", color: "#64748b", cursor: "pointer",
-    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "6px 0",
-    borderRadius: 12, fontFamily: "inherit",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "7px 0",
+    borderRadius: 14, fontFamily: "inherit",
   },
-  navBtnActive: { color: "#facc15", background: "rgba(250,204,21,.1)" },
+  navBtnActive: {
+    color: "#facc15",
+    background: "linear-gradient(180deg, rgba(250,204,21,.20), rgba(250,204,21,.07))",
+    boxShadow: "inset 0 0 0 1px rgba(250,204,21,.30), 0 4px 12px rgba(0,0,0,.25)",
+  },
   fxOverlay: {
     position: "absolute", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center",
     pointerEvents: "none", background: "rgba(5,10,22,.45)", padding: 24,
@@ -1335,6 +1660,26 @@ input:disabled, button:disabled { opacity: .5; }
 @keyframes sh-chest { 0%{transform:rotate(0)} 15%{transform:rotate(-9deg)} 30%{transform:rotate(9deg)} 45%{transform:rotate(-7deg)} 60%{transform:rotate(7deg) scale(1.06)} 80%{transform:rotate(0) scale(1.18)} 100%{transform:scale(1)} }
 .sh-prize { animation: sh-prize 1.4s cubic-bezier(.3,1.5,.4,1) both; }
 @keyframes sh-prize { 0%,50%{transform:scale(0) translateY(12px);opacity:0} 75%{transform:scale(1.35) translateY(-6px);opacity:1} 100%{transform:scale(1) translateY(0);opacity:1} }
+/* 3D: вход fx-карточек с перспективой */
+.sh-fx3d { animation: sh-fx3d .5s cubic-bezier(.2,1.1,.3,1) both; }
+@keyframes sh-fx3d { 0%{transform:perspective(700px) rotateX(-22deg) scale(.86);opacity:0} 100%{transform:perspective(700px) rotateX(0) scale(1);opacity:1} }
+/* лёгкое парение героя */
+.sh-float { animation: sh-float 4.6s ease-in-out infinite; }
+@keyframes sh-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
+/* 3D: сундук — оборот вокруг оси Y */
+.sh-chest3d { animation: sh-chest3d 1.15s cubic-bezier(.3,1.3,.4,1) both; }
+@keyframes sh-chest3d { 0%{transform:perspective(600px) rotateY(0) scale(.4);opacity:0} 55%{transform:perspective(600px) rotateY(360deg) scale(1.12);opacity:1} 100%{transform:perspective(600px) rotateY(360deg) scale(1);opacity:1} }
+/* 3D: приз — вылет с вращением */
+.sh-prize3d { animation: sh-prize3d 1.35s cubic-bezier(.3,1.5,.4,1) both; }
+@keyframes sh-prize3d { 0%,45%{transform:perspective(500px) rotateY(200deg) scale(0) translateY(14px);opacity:0} 75%{transform:perspective(500px) rotateY(360deg) scale(1.35) translateY(-6px);opacity:1} 100%{transform:perspective(500px) rotateY(360deg) scale(1) translateY(0);opacity:1} }
+/* значок достижения — вылет с оборотом */
+.sh-ach-badge { animation: sh-ach-badge .7s cubic-bezier(.3,1.5,.4,1) both; }
+@keyframes sh-ach-badge { 0%{transform:perspective(500px) rotateY(180deg) scale(.4);opacity:0} 100%{transform:perspective(500px) rotateY(360deg) scale(1);opacity:1} }
+/* вращающееся кольцо уровня */
+.sh-ring { animation: sh-ring 3s linear infinite; }
+@keyframes sh-ring { to { transform: rotate(360deg) } }
+/* контейнер наклона (3D) */
+.sh-tilt { transform-style: preserve-3d; transition: transform .25s cubic-bezier(.22,1,.36,1); }
 .sh-stagger > * { animation: sh-slidein .45s ease both; }
 .sh-stagger > *:nth-child(1){animation-delay:.02s}
 .sh-stagger > *:nth-child(2){animation-delay:.07s}
@@ -1349,5 +1694,5 @@ input:disabled, button:disabled { opacity: .5; }
 @keyframes sh-slidein { 0%{opacity:0;transform:translateY(14px)} 100%{opacity:1;transform:translateY(0)} }
 button { transition: transform .12s ease; }
 button:active:not(:disabled) { transform: scale(.96); }
-@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake,.sh-body,.sh-hero-jump,.sh-hero-spin,.sh-hero-flex,.sh-chest,.sh-prize,.sh-stagger > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .sh-pop,.sh-xp,.sh-btn-pulse,.sh-shake,.sh-body,.sh-hero-jump,.sh-hero-spin,.sh-hero-flex,.sh-chest,.sh-prize,.sh-fx3d,.sh-float,.sh-chest3d,.sh-prize3d,.sh-ach-badge,.sh-ring,.sh-stagger > * { animation: none; } }
 `;

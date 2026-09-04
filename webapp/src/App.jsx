@@ -3,8 +3,9 @@ import confetti from "canvas-confetti";
 
 // ─── Telegram WebApp + API ───────────────────────────────────
 const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
-// вне Telegram (обычный браузер) показываем демо-режим с примером прогресса
-const isDemo = !tg;
+// Демо-режим: нет подписанных данных Telegram (обычный браузер) — показываем
+// интерфейс с примером прогресса. Внутри Telegram initData всегда заполнен.
+const isDemo = !tg?.initData;
 async function apiState(method, state) {
   const res = await fetch("/api/state", {
     method,

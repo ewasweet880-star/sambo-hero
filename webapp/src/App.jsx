@@ -344,8 +344,8 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
           <stop offset="1" stopColor="#2e1a08" />
         </linearGradient>
         <linearGradient id={`boot${uid}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#ef4444" />
-          <stop offset="1" stopColor="#8f1414" />
+          <stop offset="0" stopColor="#3b82f6" />
+          <stop offset="1" stopColor="#1e3a8a" />
         </linearGradient>
         <linearGradient id={`shoe${uid}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#1c2740" />
@@ -379,8 +379,8 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
         <ellipse cx="94" cy="188" rx="13" ry="6.5" fill={gear.boots ? `url(#boot${uid})` : `url(#shoe${uid})`} stroke="rgba(0,0,0,.28)" />
         {gear.boots && (
           <>
-            <path d="M56 187 l20 0 M58 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
-            <path d="M84 187 l20 0 M88 184 l14 0" stroke="#fecaca" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+            <path d="M56 187 l20 0 M58 184 l14 0" stroke="#bfdbfe" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
+            <path d="M84 187 l20 0 M88 184 l14 0" stroke="#bfdbfe" strokeWidth="1.6" strokeLinecap="round" opacity=".85" />
           </>
         )}
 

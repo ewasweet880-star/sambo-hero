@@ -89,7 +89,7 @@ const PULLUP_PROGRAM = [
   {id:"p3", label:"Вис 60 сек", sessions:5, desc:"Минута — ты герой!"},
   {id:"p4", label:"Вис 60 сек x2", sessions:5, desc:"Два подхода"},
   {id:"p5", label:"Подбородок над турником", sessions:7, desc:"Подпрыгни!"},
-  {id:"p6", label:"Негативные подтягивания", sessions:7, desc:"Медленно вниз"},
+  {id:"p6", label:"Негат��вные подтягивания", sessions:7, desc:"Медленно вниз"},
   {id:"p7", label:"Полуподтягивание", sessions:7, desc:"До середины"},
   {id:"p8", label:"С помощью папы", sessions:7, desc:"Assisted"},
   {id:"p9", label:"1 подтягивание", sessions:10, desc:"Первое настоящее!"},
@@ -356,6 +356,22 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
           <stop offset="0.5" stopColor={beltColor} />
           <stop offset="1" stopColor={beltDark} />
         </linearGradient>
+        <linearGradient id={`giSheen${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffffff" stopOpacity=".34" />
+          <stop offset=".22" stopColor="#ffffff" stopOpacity=".06" />
+          <stop offset=".62" stopColor="#7f1d1d" stopOpacity=".05" />
+          <stop offset="1" stopColor="#450a0a" stopOpacity=".28" />
+        </linearGradient>
+        <linearGradient id={`metal${uid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#fff7b2" />
+          <stop offset=".35" stopColor="#facc15" />
+          <stop offset=".7" stopColor="#a16207" />
+          <stop offset="1" stopColor="#fde68a" />
+        </linearGradient>
+        <filter id={`softGlow${uid}`} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
       </defs>
 
       {/* золотая аура Мастера */}
@@ -363,6 +379,7 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
         <g>
           <ellipse cx="80" cy="100" rx="74" ry="94" fill="none" stroke="#facc15" strokeWidth="3" opacity=".42" strokeDasharray="7 9" />
           <ellipse cx="80" cy="100" rx="66" ry="86" fill="none" stroke="#fde047" strokeWidth="1.4" opacity=".25" />
+          <ellipse cx="80" cy="100" rx="70" ry="90" fill="none" stroke="#fff7b2" strokeWidth="1" opacity=".38" filter={`url(#softGlow${uid})`} />
         </g>
       )}
 
@@ -390,6 +407,8 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
 
         {/* куртка (самбовка) */}
         <path d="M47 78 C50 62 60 54 80 54 C100 54 110 62 113 78 L117 122 C117 128 113 130 105 130 L55 130 C47 130 43 128 43 122 Z" fill={`url(#gi${uid})`} stroke="rgba(0,0,0,.16)" />
+        <path d="M50 80 C57 67 65 61 80 60 C95 61 103 67 110 80 L112 119 C101 114 93 112 80 112 C67 112 59 114 48 119 Z" fill={`url(#giSheen${uid})`} opacity=".8" />
+        <path d="M51 78 Q58 64 72 59" stroke="rgba(255,255,255,.5)" strokeWidth="2" strokeLinecap="round" fill="none" opacity=".7" />
 
         {/* V-ворот (внутренняя часть) */}
         <path d="M80 56 L62 88 L98 88 Z" fill={`url(#giIn${uid})`} stroke="#b91c1c" strokeWidth="2" strokeLinejoin="round" />
@@ -426,7 +445,9 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
         {/* пояс — цвет уровня */}
         <rect x="49" y="117" width="62" height="12" rx="6" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
         <rect x="53" y="120" width="54" height="3.5" rx="1.75" fill="rgba(255,255,255,.45)" />
+        <path d="M55 126 Q80 131 105 126" stroke="rgba(0,0,0,.28)" strokeWidth="1.5" fill="none" />
         <rect x="72" y="116" width="16" height="14" rx="4" fill={`url(#belt${uid})`} stroke={beltDark} strokeWidth="1.5" />
+        <rect x="75" y="119" width="10" height="8" rx="2" fill="none" stroke={`url(#metal${uid})`} strokeWidth="1" opacity=".9" />
         <rect x="71" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
         <rect x="81" y="130" width="8" height="17" rx="3.5" fill={shade(beltColor, -0.12)} stroke="rgba(0,0,0,.2)" strokeWidth="1" />
 
@@ -437,6 +458,7 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
         <circle cx="54.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
         <circle cx="105.5" cy="45" r="5" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.08)" />
         <circle cx="80" cy="43" r="25" fill={`url(#skin${uid})`} stroke="rgba(0,0,0,.10)" />
+        <path d="M58 40 Q61 20 80 18 Q99 20 102 40" fill="none" stroke="rgba(255,255,255,.26)" strokeWidth="2" strokeLinecap="round" />
 
         {/* волосы */}
         <path d="M55 46 C50 22 62 11 80 11 C98 11 110 22 105 46 C103 33 93 29 80 29 C67 29 57 33 55 46 Z" fill={`url(#hair${uid})`} stroke="rgba(0,0,0,.18)" />
@@ -1534,13 +1556,14 @@ const st = {
     border: "1px solid rgba(250,204,21,.25)", flexShrink: 0,
   },
   heroCard: {
+    position: "relative", overflow: "hidden",
     background: [
-      "radial-gradient(90% 70% at 50% 8%, rgba(250,204,21,.14), transparent 65%)",
-      "linear-gradient(180deg,rgba(30,58,110,.65),rgba(11,29,58,.85))",
+      "radial-gradient(70% 48% at 50% 18%, rgba(250,204,21,.19), transparent 72%)",
+      "linear-gradient(180deg,rgba(43,73,128,.78),rgba(8,21,44,.94))",
     ].join(", "),
-    border: "1px solid rgba(250,204,21,.22)", borderRadius: 22, padding: 16,
+    border: "1px solid rgba(250,204,21,.34)", borderRadius: 24, padding: 16,
     display: "flex", flexDirection: "column", alignItems: "center",
-    boxShadow: "0 12px 32px rgba(0,0,0,.35)",
+    boxShadow: "0 18px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.14)",
   },
   heroChip: {
     background: "rgba(0,0,0,.3)", borderRadius: 14, padding: "8px 12px",

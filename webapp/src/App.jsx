@@ -89,7 +89,7 @@ const PULLUP_PROGRAM = [
   {id:"p3", label:"Вис 60 сек", sessions:5, desc:"Минута — ты герой!"},
   {id:"p4", label:"Вис 60 сек x2", sessions:5, desc:"Два подхода"},
   {id:"p5", label:"Подбородок над турником", sessions:7, desc:"Подпрыгни!"},
-  {id:"p6", label:"Негат��вные подтягивания", sessions:7, desc:"Медленно вниз"},
+  {id:"p6", label:"Негат����вные подтягивания", sessions:7, desc:"Медленно вниз"},
   {id:"p7", label:"Полуподтягивание", sessions:7, desc:"До середины"},
   {id:"p8", label:"С помощью папы", sessions:7, desc:"Assisted"},
   {id:"p9", label:"1 подтягивание", sessions:10, desc:"Первое настоящее!"},
@@ -321,7 +321,7 @@ function SamboCharacter({ beltColor = "#f8fafc", size = 150, glow = false, gear 
   const beltLight = shade(beltColor, 0.18);
   const bodyCls = "sh-body" + (mood === "celebrate" ? " sh-hero-jump" : "") + (mood === "levelup" ? " sh-hero-spin" : "") + (mood === "tap" ? " sh-hero-flex" : "");
   return (
-    <svg width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.5))" : "none" }}>
+    <svg className="sh-character" width={size} height={size * 1.25} viewBox="0 0 160 200" onClick={onTap} style={{ cursor: onTap ? "pointer" : "default", filter: glow ? "drop-shadow(0 0 18px rgba(250,204,21,.5))" : "none" }}>
       <defs>
         <linearGradient id={`skin${uid}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#f7cda0" />
@@ -1318,7 +1318,7 @@ function Calendar({ trainings, competitions = [], bestStreak, streak, calMonth, 
   );
 }
 
-// ─── Герой: персонаж, статистика, достижения, путь ───────────
+// ─── Герой: персонаж, статистика, достижения, путь ────────���──
 function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique }) {
   const unlockedCount = state.achievements.length;
   const stats = state.stats || { str: 0, end: 0, tech: 0 };
@@ -1328,12 +1328,13 @@ function HeroTab({ state, level, bestStreak, streak, gear = {}, onLearnTechnique
     { key: "boots", icon: "👟", name: "Борцовки", how: "25 тренировок" },
     { key: "gloves", icon: "🧤", name: "Перчатки", how: "14 тренировок подряд" },
     { key: "patch", icon: "⭐", name: "Нашивка", how: "первое соревнование" },
-    { key: "aura", icon: "✨", name: "Аура Мастера", how: "уровень «Мастер»" },
+    { key: "aura", icon: "✨", name: "Аура Мастера", how: "уров��нь «Мастер»" },
   ];
   return (
     <>
-      <div style={{ ...st.heroCard, paddingTop: 24 }}>
-        <SamboCharacter beltColor={level.cur.beltColor} size={130} glow gear={gear} />
+  <div className="sh-hero-stage" style={{ ...st.heroCard, paddingTop: 24 }}>
+  <div className="sh-hero-light" aria-hidden="true" />
+  <SamboCharacter beltColor={level.cur.beltColor} size={130} glow gear={gear} />
         <div style={{ fontSize: 24, fontWeight: 900, color: "#fff" }}>{state.name}</div>
         <div style={{ fontSize: 14, color: level.cur.color, fontWeight: 800 }}>{level.cur.name} · пояс: {level.cur.belt}</div>
       </div>
@@ -1672,8 +1673,14 @@ const css = `
 @keyframes sh-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
 .sh-shake { animation: sh-shake .3s ease 2; }
 input:disabled, button:disabled { opacity: .5; }
-.sh-body { transform-box: fill-box; transform-origin: 50% 95%; animation: sh-breathe 3.2s ease-in-out infinite; }
-@keyframes sh-breathe { 0%,100%{transform:scaleY(1)} 50%{transform:scaleY(1.02) translateY(-1px)} }
+  .sh-body { transform-box: fill-box; transform-origin: 50% 95%; animation: sh-breathe 3.2s ease-in-out infinite; }
+  @keyframes sh-breathe { 0%,100%{transform:scaleY(1) rotate(0deg)} 50%{transform:scaleY(1.02) translateY(-1px) rotate(-.6deg)} }
+  .sh-character { transform-origin: 50% 100%; transition: transform .45s cubic-bezier(.22,1,.36,1), filter .45s ease; }
+  .sh-hero-stage:hover .sh-character { transform: translateY(-5px) rotate(-2deg) scale(1.035); filter: drop-shadow(0 0 22px rgba(250,204,21,.7)) !important; }
+  .sh-hero-stage { isolation: isolate; }
+  .sh-hero-light { position:absolute; inset:12% 18% 42%; border-radius:50%; background:radial-gradient(circle,rgba(255,247,178,.28),transparent 68%); filter:blur(16px); opacity:.58; pointer-events:none; animation:sh-light-sweep 5s ease-in-out infinite; }
+  @keyframes sh-light-sweep { 0%,100%{transform:translateX(-18px);opacity:.35} 50%{transform:translateX(18px);opacity:.72} }
+  @media (prefers-reduced-motion: reduce) { .sh-body,.sh-hero-light,.sh-character { animation:none !important; transition:none !important; } }
 .sh-hero-jump { animation: sh-hero-jump .65s cubic-bezier(.3,1.6,.4,1) infinite; }
 @keyframes sh-hero-jump { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-13px) scaleY(1.04)} 70%{transform:translateY(0) scaleY(.96)} }
 .sh-hero-spin { animation: sh-hero-spin 1s ease-in-out infinite; }
